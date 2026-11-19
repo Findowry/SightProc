@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SightProc
+GenericName=System Monitor
+GenericName[tr]=Sistem Monitörü
+Comment=Qt6 Widgets C++20 based GNU/Linux system monitor
+Comment[tr]=Qt6 Widgets C++20 tabanlı GNU/Linux sistem monitörü
+Exec=sightproc
+Icon=sightproc
+Terminal=false
+Categories=System;Monitor;Qt;
+StartupNotify=true
