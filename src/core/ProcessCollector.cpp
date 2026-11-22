@@ -313,6 +313,7 @@ ProcessSnapshot ProcessCollector::collect(double elapsedSec, bool probeSleepingG
             (void)skipI;
             proc.niceValue = static_cast<int>(niceVal);
             proc.threads = std::max(1, static_cast<int>(numThreads));
+            proc.startTimeTicks = starttime;
             proc.stateText = stateDescription(proc.stateChar);
         }
 

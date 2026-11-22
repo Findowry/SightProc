@@ -7,6 +7,8 @@
 #include <QVector>
 #include <QWidget>
 
+#include <cstdint>
+
 class QComboBox;
 class QEvent;
 class QFrame;
@@ -58,8 +60,15 @@ private:
     void updateCountLabel();
     [[nodiscard]] const ProcessInfo* selectedProcess() const;
     void openDetailsForProcess(const ProcessInfo& proc);
-    void sendSignalToProcess(int pid, const QString& procName, int sig, const QString& sigLabel);
-    void setProcessNice(int pid, const QString& procName, int niceValue);
+    void sendSignalToProcess(int pid,
+                             std::uint64_t expectedStartTime,
+                             const QString& procName,
+                             int sig,
+                             const QString& sigLabel);
+    void setProcessNice(int pid,
+                        std::uint64_t expectedStartTime,
+                        const QString& procName,
+                        int niceValue);
     void runPkexecAction(const QStringList& args, const QString& actionTitle);
     void collectExpandedPids(const QModelIndex& parent, QSet<int>& outPids) const;
     void restoreExpandedPids(const QModelIndex& parent);

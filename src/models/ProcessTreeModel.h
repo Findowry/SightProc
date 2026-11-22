@@ -7,11 +7,19 @@
 #include <QIcon>
 #include <QVector>
 
+#include <memory>
+#include <vector>
+
 namespace sysmon {
 
 /**
- * @brief Süreçleri tercihe bağlı olarak dallanan PPID ağacı veya düz liste
- *        biçiminde gösteren, simge önbellekli 11 sütunlu model.
+ * @brief Süreçleri tercihe bağlı olarak dallanan PPID ağacı veya düz liste biçiminde
+ *        gösteren, simge önbellekli 11 sütunlu hibrit artımlı model.
+ *
+ * Normal ekleme/çıkarma ve veri güncellemeleri beginInsertRows / beginRemoveRows /
+ * dataChanged ile artımlı uygulanır; görünüm modu değişimi, PID yeniden kullanımı veya
+ * çekirdek tarafından ebeveyn değişimi (reparenting) durumunda tutarlılık için
+ * güvenli tam sıfırlamaya (beginResetModel) geri düşer.
  */
 class ProcessTreeModel : public QAbstractItemModel {
     Q_OBJECT
@@ -64,20 +72,23 @@ signals:
 private:
     struct Node {
         ProcessInfo info;
-        int parentNode{-1};
+        Node* parent{nullptr};
         int rowInParent{0};
-        QVector<int> children;
+        std::vector<std::unique_ptr<Node>> children;
     };
 
+    [[nodiscard]] Node* nodeFromIndex(const QModelIndex& index) const noexcept;
+    [[nodiscard]] QModelIndex indexForNode(Node* node, int column = 0) const;
+    void eraseSubtreeFromMap(Node* node);
     void rebuildTree(const QVector<ProcessInfo>& processes);
-    void emitDataChangedRecursive(int parentNodeIdx, const QModelIndex& parentIdx);
+    void emitDataChangedRecursive(Node* parentNode, const QModelIndex& parentIdx);
     [[nodiscard]] QIcon resolveProcessIcon(const ProcessInfo& proc) const;
 
     bool m_treeMode{true};
     bool m_showIcons{true};
     QVector<ProcessInfo> m_lastProcesses;
-    QVector<Node> m_nodes;
-    QHash<int, int> m_pidToNode;
+    std::unique_ptr<Node> m_root;
+    QHash<int, Node*> m_pidToNode;
     mutable QHash<QString, QIcon> m_iconCache;
 };
 

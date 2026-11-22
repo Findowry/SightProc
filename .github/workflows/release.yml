@@ -1,0 +1,86 @@
+name: Release AppImage
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release SightProc (x86_64 AppImage)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system build and Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            patchelf \
+            wget \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libxkbcommon-dev \
+            libxcb-cursor0 \
+            libwayland-dev
+
+      - name: Install Qt 6
+        id: install-qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.9.*'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+          modules: 'qtsvg qtwayland'
+          cache: true
+
+      - name: Configure and build SightProc
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build --parallel
+          DESTDIR="$PWD/AppDir" cmake --install build
+
+      - name: Download linuxdeploy and Qt plugin
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+      - name: Build SightProc-x86_64.AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          EXTRA_QT_MODULES: 'svg;wayland'
+          EXTRA_PLATFORM_PLUGINS: 'libqwayland-egl.so;libqwayland-generic.so'
+          LDAI_OUTPUT: 'SightProc-x86_64.AppImage'
+          VERSION: ${{ github.ref_name }}
+        run: |
+          export QMAKE="${{ steps.install-qt.outputs.qt-root-dir }}/bin/qmake"
+          if [ ! -x "$QMAKE" ]; then
+            QMAKE="$(command -v qmake6 || command -v qmake)"
+          fi
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/sightproc \
+            --desktop-file AppDir/usr/share/applications/sightproc.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/sightproc.svg \
+            --plugin qt \
+            --output appimage
+          test -f SightProc-x86_64.AppImage
+          ls -lh SightProc-x86_64.AppImage
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: SightProc-x86_64.AppImage

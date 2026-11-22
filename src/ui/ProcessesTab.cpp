@@ -31,12 +31,64 @@
 #include <algorithm>
 #include <cerrno>
 #include <csignal>
+#include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <optional>
+#include <sstream>
+#include <string>
 #include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 namespace sysmon {
 
 namespace {
+
+std::optional<std::uint64_t> readProcStartTimeTicks(int pid) {
+    if (pid <= 0) {
+        return std::nullopt;
+    }
+    std::ifstream file("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    if (!std::getline(file, line)) {
+        return std::nullopt;
+    }
+    const auto closeParen = line.rfind(')');
+    if (closeParen == std::string::npos) {
+        return std::nullopt;
+    }
+    std::istringstream iss(line.substr(closeParen + 1));
+    char stateChar = '?';
+    std::uint64_t skipU = 0;
+    long skipL = 0;
+    int skipI = 0;
+    std::uint64_t starttime = 0;
+    if (!(iss >> stateChar >> skipI >> skipI >> skipI >> skipI >> skipI
+              >> skipU >> skipU >> skipU >> skipU >> skipU >> skipU >> skipU
+              >> skipU >> skipU >> skipL >> skipL >> skipL >> skipU >> starttime)) {
+        return std::nullopt;
+    }
+    return starttime;
+}
+
+bool verifySameProcess(int pid, std::uint64_t expectedStartTime) {
+    if (expectedStartTime == 0) {
+        return true;
+    }
+    const auto live = readProcStartTimeTicks(pid);
+    return live.has_value() && *live == expectedStartTime;
+}
+
+int openPidFd(int pid) {
+#ifdef SYS_pidfd_open
+    return static_cast<int>(::syscall(SYS_pidfd_open, static_cast<pid_t>(pid), 0U));
+#else
+    (void)pid;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
 
 struct SignalDef {
     int sig;
@@ -229,7 +281,7 @@ void ProcessesTab::setupUi() {
     m_treeView->setColumnWidth(ProcessTreeModel::ColMemoryRss, 102);
     m_treeView->setColumnWidth(ProcessTreeModel::ColMemoryShared, 116);
     m_treeView->setColumnWidth(ProcessTreeModel::ColDiskIo, 114);
-    m_treeView->setColumnWidth(ProcessTreeModel::ColNetwork, 98);
+    m_treeView->setColumnWidth(ProcessTreeModel::ColNetwork, 112);
     m_treeView->setColumnWidth(ProcessTreeModel::ColGpuPercent, 74);
     m_treeView->setColumnWidth(ProcessTreeModel::ColGpuMemory, 98);
 
@@ -244,6 +296,16 @@ void ProcessesTab::setupUi() {
             this, &ProcessesTab::onAboutToRebuild);
     connect(m_model, &ProcessTreeModel::rebuilt,
             this, &ProcessesTab::onRebuilt);
+    connect(m_proxy, &QAbstractItemModel::rowsInserted,
+            this, [this](const QModelIndex& parent, int, int) {
+                if (m_model->treeMode() && m_proxy->hasActiveFilter()) {
+                    if (parent.isValid()) {
+                        m_treeView->expand(parent);
+                    } else {
+                        m_treeView->expandAll();
+                    }
+                }
+            });
 
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         m_proxy->setSearchText(text);
@@ -550,7 +612,8 @@ void ProcessesTab::onContextMenuRequested(const QPoint& pos) {
                     return;
                 }
             }
-            sendSignalToProcess(proc.pid, proc.name, sd.sig, QString::fromLatin1(sd.name));
+            sendSignalToProcess(
+                proc.pid, proc.startTimeTicks, proc.name, sd.sig, QString::fromLatin1(sd.name));
         });
     }
 
@@ -575,7 +638,7 @@ void ProcessesTab::onContextMenuRequested(const QPoint& pos) {
         act->setCheckable(true);
         act->setChecked(proc.niceValue == p.value);
         connect(act, &QAction::triggered, this, [this, proc, val = p.value]() {
-            setProcessNice(proc.pid, proc.name, val);
+            setProcessNice(proc.pid, proc.startTimeTicks, proc.name, val);
         });
     }
     niceMenu->addSeparator();
@@ -604,7 +667,8 @@ void ProcessesTab::onContextMenuRequested(const QPoint& pos) {
         openDetailsForProcess(proc);
     });
     connect(termAct, &QAction::triggered, this, [this, proc]() {
-        sendSignalToProcess(proc.pid, proc.name, SIGTERM, QStringLiteral("SIGTERM"));
+        sendSignalToProcess(
+            proc.pid, proc.startTimeTicks, proc.name, SIGTERM, QStringLiteral("SIGTERM"));
     });
     connect(killAct, &QAction::triggered, this, [this, proc]() {
         if (AppSettings::instance().confirmSigkill()) {
@@ -621,13 +685,16 @@ void ProcessesTab::onContextMenuRequested(const QPoint& pos) {
                 return;
             }
         }
-        sendSignalToProcess(proc.pid, proc.name, SIGKILL, QStringLiteral("SIGKILL"));
+        sendSignalToProcess(
+            proc.pid, proc.startTimeTicks, proc.name, SIGKILL, QStringLiteral("SIGKILL"));
     });
     connect(stopAct, &QAction::triggered, this, [this, proc]() {
-        sendSignalToProcess(proc.pid, proc.name, SIGSTOP, QStringLiteral("SIGSTOP"));
+        sendSignalToProcess(
+            proc.pid, proc.startTimeTicks, proc.name, SIGSTOP, QStringLiteral("SIGSTOP"));
     });
     connect(contAct, &QAction::triggered, this, [this, proc]() {
-        sendSignalToProcess(proc.pid, proc.name, SIGCONT, QStringLiteral("SIGCONT"));
+        sendSignalToProcess(
+            proc.pid, proc.startTimeTicks, proc.name, SIGCONT, QStringLiteral("SIGCONT"));
     });
     connect(customNiceAct, &QAction::triggered, this, [this, proc]() {
         bool ok = false;
@@ -644,7 +711,7 @@ void ProcessesTab::onContextMenuRequested(const QPoint& pos) {
             1,
             &ok);
         if (ok) {
-            setProcessNice(proc.pid, proc.name, val);
+            setProcessNice(proc.pid, proc.startTimeTicks, proc.name, val);
         }
     });
     connect(copyPidAct, &QAction::triggered, this, [proc]() {
@@ -663,15 +730,49 @@ void ProcessesTab::onContextMenuRequested(const QPoint& pos) {
 }
 
 void ProcessesTab::sendSignalToProcess(int pid,
+                                       std::uint64_t expectedStartTime,
                                        const QString& procName,
                                        int sig,
                                        const QString& sigLabel) {
-    if (::kill(static_cast<pid_t>(pid), sig) == 0) {
+    auto warnPidReused = [&]() {
+        QMessageBox::warning(
+            this,
+            trText("Process Exited or PID Reused", "Süreç Sonlanmış veya PID Yeniden Kullanılmış"),
+            trText("Process %1 (PID %2) is no longer the same running instance; the action was cancelled for safety.",
+                   "%1 (PID %2) süreci artık aynı çalışan örnek değil; güvenlik için işlem iptal edildi.")
+                .arg(procName)
+                .arg(pid));
+    };
+
+    const int pidfd = openPidFd(pid);
+    if (pidfd < 0 && errno == ESRCH) {
         return;
     }
 
-    const int err = errno;
-    if (err == ESRCH) {
+    if (!verifySameProcess(pid, expectedStartTime)) {
+        if (pidfd >= 0) {
+            ::close(pidfd);
+        }
+        warnPidReused();
+        return;
+    }
+
+    int ret = -1;
+    int err = 0;
+    if (pidfd >= 0) {
+#ifdef SYS_pidfd_send_signal
+        ret = static_cast<int>(::syscall(SYS_pidfd_send_signal, pidfd, sig, nullptr, 0U));
+#else
+        ret = ::kill(static_cast<pid_t>(pid), sig);
+#endif
+        err = errno;
+        ::close(pidfd);
+    } else {
+        ret = ::kill(static_cast<pid_t>(pid), sig);
+        err = errno;
+    }
+
+    if (ret == 0 || err == ESRCH) {
         return;
     }
     if (err == EPERM || err == EACCES) {
@@ -685,6 +786,10 @@ void ProcessesTab::sendSignalToProcess(int pid,
             QMessageBox::Yes | QMessageBox::No,
             QMessageBox::Yes);
         if (reply == QMessageBox::Yes) {
+            if (!verifySameProcess(pid, expectedStartTime)) {
+                warnPidReused();
+                return;
+            }
             runPkexecAction(
                 {QStringLiteral("kill"), QStringLiteral("-%1").arg(sig), QString::number(pid)},
                 trText("Process Signal", "Süreç Sinyali"));
@@ -702,14 +807,41 @@ void ProcessesTab::sendSignalToProcess(int pid,
             .arg(QString::fromLocal8Bit(std::strerror(err))));
 }
 
-void ProcessesTab::setProcessNice(int pid, const QString& procName, int niceValue) {
-    errno = 0;
-    if (::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), niceValue) == 0) {
+void ProcessesTab::setProcessNice(int pid,
+                                  std::uint64_t expectedStartTime,
+                                  const QString& procName,
+                                  int niceValue) {
+    auto warnPidReused = [&]() {
+        QMessageBox::warning(
+            this,
+            trText("Process Exited or PID Reused", "Süreç Sonlanmış veya PID Yeniden Kullanılmış"),
+            trText("Process %1 (PID %2) is no longer the same running instance; the action was cancelled for safety.",
+                   "%1 (PID %2) süreci artık aynı çalışan örnek değil; güvenlik için işlem iptal edildi.")
+                .arg(procName)
+                .arg(pid));
+    };
+
+    const int pidfd = openPidFd(pid);
+    if (pidfd < 0 && errno == ESRCH) {
         return;
     }
 
+    if (!verifySameProcess(pid, expectedStartTime)) {
+        if (pidfd >= 0) {
+            ::close(pidfd);
+        }
+        warnPidReused();
+        return;
+    }
+
+    errno = 0;
+    const int ret = ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), niceValue);
     const int err = errno;
-    if (err == ESRCH) {
+    if (pidfd >= 0) {
+        ::close(pidfd);
+    }
+
+    if (ret == 0 || err == ESRCH) {
         return;
     }
     if (err == EPERM || err == EACCES) {
@@ -724,6 +856,10 @@ void ProcessesTab::setProcessNice(int pid, const QString& procName, int niceValu
             QMessageBox::Yes | QMessageBox::No,
             QMessageBox::Yes);
         if (reply == QMessageBox::Yes) {
+            if (!verifySameProcess(pid, expectedStartTime)) {
+                warnPidReused();
+                return;
+            }
             runPkexecAction(
                 {QStringLiteral("renice"),
                  QStringLiteral("-n"),

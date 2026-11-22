@@ -7,53 +7,59 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 namespace sysmon {
 
 ProcessTreeModel::ProcessTreeModel(QObject* parent)
-    : QAbstractItemModel(parent) {
-    m_nodes.push_back(Node{}); // Görünmez kök düğüm (indeks 0)
+    : QAbstractItemModel(parent)
+    , m_root(std::make_unique<Node>()) {}
+
+ProcessTreeModel::Node* ProcessTreeModel::nodeFromIndex(const QModelIndex& index) const noexcept {
+    if (!index.isValid()) {
+        return nullptr;
+    }
+    return static_cast<Node*>(index.internalPointer());
+}
+
+QModelIndex ProcessTreeModel::indexForNode(Node* node, int column) const {
+    if (!node || node == m_root.get() || column < 0 || column >= ColCount) {
+        return {};
+    }
+    return createIndex(node->rowInParent, column, node);
 }
 
 QModelIndex ProcessTreeModel::index(int row, int column, const QModelIndex& parent) const {
     if (column < 0 || column >= ColCount || row < 0) {
         return {};
     }
-    const int parentIdx = parent.isValid() ? static_cast<int>(parent.internalId()) : 0;
-    if (parentIdx < 0 || parentIdx >= m_nodes.size()) {
+    if (parent.isValid() && parent.column() > 0) {
         return {};
     }
-    const QVector<int>& children = m_nodes[parentIdx].children;
-    if (row >= children.size()) {
+    Node* parentNode = parent.isValid() ? nodeFromIndex(parent) : m_root.get();
+    if (!parentNode || static_cast<std::size_t>(row) >= parentNode->children.size()) {
         return {};
     }
-    return createIndex(row, column, static_cast<quintptr>(children[row]));
+    return createIndex(row, column, parentNode->children[static_cast<std::size_t>(row)].get());
 }
 
 QModelIndex ProcessTreeModel::parent(const QModelIndex& child) const {
     if (!child.isValid()) {
         return {};
     }
-    const int nodeIdx = static_cast<int>(child.internalId());
-    if (nodeIdx <= 0 || nodeIdx >= m_nodes.size()) {
+    Node* childNode = nodeFromIndex(child);
+    if (!childNode || !childNode->parent || childNode->parent == m_root.get()) {
         return {};
     }
-    const int parentIdx = m_nodes[nodeIdx].parentNode;
-    if (parentIdx <= 0 || parentIdx >= m_nodes.size()) {
-        return {};
-    }
-    return createIndex(m_nodes[parentIdx].rowInParent, 0, static_cast<quintptr>(parentIdx));
+    return createIndex(childNode->parent->rowInParent, 0, childNode->parent);
 }
 
 int ProcessTreeModel::rowCount(const QModelIndex& parent) const {
     if (parent.column() > 0) {
         return 0;
     }
-    const int parentIdx = parent.isValid() ? static_cast<int>(parent.internalId()) : 0;
-    if (parentIdx < 0 || parentIdx >= m_nodes.size()) {
-        return 0;
-    }
-    return static_cast<int>(m_nodes[parentIdx].children.size());
+    Node* parentNode = parent.isValid() ? nodeFromIndex(parent) : m_root.get();
+    return parentNode ? static_cast<int>(parentNode->children.size()) : 0;
 }
 
 int ProcessTreeModel::columnCount(const QModelIndex&) const {
@@ -63,7 +69,14 @@ int ProcessTreeModel::columnCount(const QModelIndex&) const {
 QVariant ProcessTreeModel::headerData(int section,
                                       Qt::Orientation orientation,
                                       int role) const {
-    if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+    if (orientation != Qt::Horizontal) {
+        return {};
+    }
+    if (role == Qt::ToolTipRole && section == ColNetwork) {
+        return trText("Measures TCP traffic only via rootless NETLINK_SOCK_DIAG (excludes UDP/QUIC).",
+                      "Root yetkisi olmadan NETLINK_SOCK_DIAG üzerinden yalnızca TCP trafiği ölçülür (UDP/QUIC hariç).");
+    }
+    if (role != Qt::DisplayRole) {
         return {};
     }
     switch (section) {
@@ -84,7 +97,7 @@ QVariant ProcessTreeModel::headerData(int section,
     case ColDiskIo:
         return trText("Disk Read/Write", "Disk Okuma/Yazma");
     case ColNetwork:
-        return trText("Network", "Ağ");
+        return trText("TCP Network", "TCP Ağı");
     case ColGpuPercent:
         return trText("GPU %", "GPU %");
     case ColGpuMemory:
@@ -124,12 +137,12 @@ QVariant ProcessTreeModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid()) {
         return {};
     }
-    const int nodeIdx = static_cast<int>(index.internalId());
-    if (nodeIdx <= 0 || nodeIdx >= m_nodes.size()) {
+    Node* node = nodeFromIndex(index);
+    if (!node || node == m_root.get()) {
         return {};
     }
 
-    const ProcessInfo& p = m_nodes[nodeIdx].info;
+    const ProcessInfo& p = node->info;
     const int col = index.column();
 
     if (role == Qt::TextAlignmentRole) {
@@ -208,8 +221,8 @@ QVariant ProcessTreeModel::data(const QModelIndex& index, int role) const {
                      fmt::formatRate(p.netTxBytesPerSec),
                      trText("Active TCP sockets", "Aktif TCP soket"))
                 .arg(p.tcpSocketCount)
-                .arg(trText("(Rootless NETLINK_SOCK_DIAG TCP accounting)",
-                            "(Kök yetkisiz NETLINK_SOCK_DIAG TCP ölçümü)"));
+                .arg(trText("(TCP only via rootless NETLINK_SOCK_DIAG; excludes UDP/QUIC)",
+                            "(Root yetkisiz NETLINK_SOCK_DIAG üzerinden yalnızca TCP; UDP/QUIC hariç)"));
         case ColGpuPercent:
         case ColGpuMemory:
             if (!p.hasGpuMetrics) {
@@ -271,125 +284,266 @@ void ProcessTreeModel::setShowIcons(bool enabled) {
         return;
     }
     m_showIcons = enabled;
-    emitDataChangedRecursive(0, QModelIndex());
+    emitDataChangedRecursive(m_root.get(), QModelIndex());
 }
 
 void ProcessTreeModel::retranslate() {
     emit headerDataChanged(Qt::Horizontal, 0, ColCount - 1);
-    emitDataChangedRecursive(0, QModelIndex());
+    emitDataChangedRecursive(m_root.get(), QModelIndex());
 }
 
-void ProcessTreeModel::emitDataChangedRecursive(int parentNodeIdx, const QModelIndex& parentIdx) {
-    if (parentNodeIdx < 0 || parentNodeIdx >= m_nodes.size()) {
+void ProcessTreeModel::emitDataChangedRecursive(Node* parentNode, const QModelIndex& parentIdx) {
+    if (!parentNode || parentNode->children.empty()) {
         return;
     }
-    const QVector<int>& children = m_nodes[parentNodeIdx].children;
-    if (children.isEmpty()) {
-        return;
-    }
-    emit dataChanged(index(0, 0, parentIdx),
-                     index(static_cast<int>(children.size()) - 1, ColCount - 1, parentIdx));
-    for (int r = 0; r < children.size(); ++r) {
-        const int childNodeIdx = children[r];
-        if (!m_nodes[childNodeIdx].children.isEmpty()) {
-            emitDataChangedRecursive(childNodeIdx, index(r, 0, parentIdx));
+    const int lastRow = static_cast<int>(parentNode->children.size()) - 1;
+    emit dataChanged(index(0, 0, parentIdx), index(lastRow, ColCount - 1, parentIdx));
+    for (int r = 0; r <= lastRow; ++r) {
+        Node* childNode = parentNode->children[static_cast<std::size_t>(r)].get();
+        if (!childNode->children.empty()) {
+            emitDataChangedRecursive(childNode, index(r, 0, parentIdx));
         }
+    }
+}
+
+void ProcessTreeModel::eraseSubtreeFromMap(Node* node) {
+    if (!node) {
+        return;
+    }
+    for (const auto& child : node->children) {
+        eraseSubtreeFromMap(child.get());
+    }
+    if (node != m_root.get()) {
+        m_pidToNode.remove(node->info.pid);
     }
 }
 
 void ProcessTreeModel::updateProcesses(const QVector<ProcessInfo>& incoming) {
     m_lastProcesses = incoming;
 
-    // Hızlı yol: PID seti ve ebeveyn topolojisi birebir aynıysa yalnızca veri güncelle
-    if (incoming.size() == (m_nodes.size() - 1)) {
-        QSet<int> incomingPids;
-        incomingPids.reserve(incoming.size());
-        for (const auto& p : incoming) {
-            incomingPids.insert(p.pid);
-        }
+    if (m_pidToNode.isEmpty()) {
+        rebuildTree(incoming);
+        return;
+    }
 
-        bool topologyMatch = (incomingPids.size() == incoming.size());
-        if (topologyMatch) {
-            for (const auto& p : incoming) {
-                const auto it = m_pidToNode.constFind(p.pid);
-                if (it == m_pidToNode.constEnd()) {
-                    topologyMatch = false;
-                    break;
-                }
-                const int nodeIdx = *it;
-                const int expectedParentPid =
-                    (m_treeMode && incomingPids.contains(p.ppid) && p.ppid != p.pid && p.ppid > 0)
-                    ? p.ppid
-                    : 0;
-                const int curParentNode = m_nodes[nodeIdx].parentNode;
-                const int curParentPid = (curParentNode > 0) ? m_nodes[curParentNode].info.pid : 0;
-                if (expectedParentPid != curParentPid) {
-                    topologyMatch = false;
-                    break;
-                }
-            }
-        }
-
-        if (topologyMatch) {
-            for (const auto& p : incoming) {
-                const int nodeIdx = m_pidToNode.value(p.pid);
-                m_nodes[nodeIdx].info = p;
-            }
-            emitDataChangedRecursive(0, QModelIndex());
+    std::unordered_map<int, const ProcessInfo*> incomingByPid;
+    incomingByPid.reserve(static_cast<std::size_t>(incoming.size()));
+    for (const ProcessInfo& p : incoming) {
+        if (p.pid <= 0 || !incomingByPid.emplace(p.pid, &p).second) {
+            rebuildTree(incoming);
             return;
         }
     }
 
-    rebuildTree(incoming);
+    auto computeDesiredParentPid = [&](const ProcessInfo& p) -> int {
+        if (!m_treeMode || p.ppid <= 0 || p.ppid == p.pid) {
+            return 0;
+        }
+        if (incomingByPid.find(p.ppid) == incomingByPid.end()) {
+            return 0;
+        }
+        int probe = p.ppid;
+        for (int depth = 0; depth < 64 && probe > 0; ++depth) {
+            if (probe == p.pid) {
+                return 0;
+            }
+            const auto it = incomingByPid.find(probe);
+            if (it == incomingByPid.end()) {
+                break;
+            }
+            const int nextPpid = it->second->ppid;
+            probe = (nextPpid > 0 && nextPpid != probe &&
+                     incomingByPid.find(nextPpid) != incomingByPid.end())
+                ? nextPpid
+                : 0;
+        }
+        return p.ppid;
+    };
+
+    std::unordered_map<int, int> desiredParentMap;
+    desiredParentMap.reserve(incomingByPid.size());
+    for (const ProcessInfo& p : incoming) {
+        desiredParentMap.emplace(p.pid, computeDesiredParentPid(p));
+    }
+
+    // Artımlı güvenlik kontrolü: PID yeniden kullanımı veya yaşayan sürecin ebeveyn değişimi
+    // varsa QSortFilterProxyModel tutarlılığı için güvenli tam sıfırlamaya düş.
+    for (auto it = m_pidToNode.constBegin(); it != m_pidToNode.constEnd(); ++it) {
+        const int pid = it.key();
+        Node* node = it.value();
+        const auto inIt = incomingByPid.find(pid);
+        if (inIt == incomingByPid.end()) {
+            continue;
+        }
+        const ProcessInfo* inc = inIt->second;
+        if (node->info.startTimeTicks != 0 && inc->startTimeTicks != 0 &&
+            node->info.startTimeTicks != inc->startTimeTicks) {
+            rebuildTree(incoming);
+            return;
+        }
+        const int curParentPid = (node->parent && node->parent != m_root.get())
+            ? node->parent->info.pid
+            : 0;
+        if (curParentPid != desiredParentMap[pid]) {
+            rebuildTree(incoming);
+            return;
+        }
+    }
+
+    // 1. Ölen üst alt-ağaçları (ebeveyni hayatta kalan veya kök olanlar) artımlı sil.
+    std::vector<Node*> deadSubtreeRoots;
+    for (auto it = m_pidToNode.constBegin(); it != m_pidToNode.constEnd(); ++it) {
+        Node* node = it.value();
+        if (incomingByPid.find(it.key()) != incomingByPid.end()) {
+            continue;
+        }
+        Node* p = node->parent;
+        if (!p || p == m_root.get() || incomingByPid.find(p->info.pid) != incomingByPid.end()) {
+            deadSubtreeRoots.push_back(node);
+        }
+    }
+
+    for (Node* deadNode : deadSubtreeRoots) {
+        Node* parentNode = deadNode->parent ? deadNode->parent : m_root.get();
+        const int row = deadNode->rowInParent;
+        if (row < 0 || static_cast<std::size_t>(row) >= parentNode->children.size() ||
+            parentNode->children[static_cast<std::size_t>(row)].get() != deadNode) {
+            rebuildTree(incoming);
+            return;
+        }
+        beginRemoveRows(indexForNode(parentNode, 0), row, row);
+        eraseSubtreeFromMap(deadNode);
+        parentNode->children.erase(parentNode->children.begin() + row);
+        for (std::size_t i = static_cast<std::size_t>(row); i < parentNode->children.size(); ++i) {
+            parentNode->children[i]->rowInParent = static_cast<int>(i);
+        }
+        endRemoveRows();
+    }
+
+    // 2. Hayatta kalan süreç verilerini yerinde güncelle ve dataChanged yayınla.
+    for (auto it = m_pidToNode.constBegin(); it != m_pidToNode.constEnd(); ++it) {
+        const auto inIt = incomingByPid.find(it.key());
+        if (inIt != incomingByPid.end()) {
+            it.value()->info = *(inIt->second);
+        }
+    }
+    emitDataChangedRecursive(m_root.get(), QModelIndex());
+
+    // 3. Yeni doğan süreçleri üstten alta doğru artımlı ekle.
+    QVector<const ProcessInfo*> pendingInsert;
+    pendingInsert.reserve(incoming.size());
+    for (const ProcessInfo& p : incoming) {
+        if (!m_pidToNode.contains(p.pid)) {
+            pendingInsert.push_back(&p);
+        }
+    }
+
+    while (!pendingInsert.isEmpty()) {
+        QHash<Node*, QVector<const ProcessInfo*>> batches;
+        QVector<Node*> batchOrder;
+        QVector<const ProcessInfo*> deferred;
+
+        for (const ProcessInfo* p : pendingInsert) {
+            const int desParentPid = desiredParentMap[p->pid];
+            Node* parentNode = nullptr;
+            if (desParentPid == 0) {
+                parentNode = m_root.get();
+            } else if (const auto pIt = m_pidToNode.constFind(desParentPid);
+                       pIt != m_pidToNode.constEnd()) {
+                parentNode = *pIt;
+            }
+
+            if (parentNode) {
+                if (!batches.contains(parentNode)) {
+                    batchOrder.push_back(parentNode);
+                }
+                batches[parentNode].push_back(p);
+            } else {
+                deferred.push_back(p);
+            }
+        }
+
+        if (batchOrder.isEmpty()) {
+            rebuildTree(incoming);
+            return;
+        }
+
+        for (Node* parentNode : batchOrder) {
+            const QVector<const ProcessInfo*>& batch = batches[parentNode];
+            const int first = static_cast<int>(parentNode->children.size());
+            const int last = first + static_cast<int>(batch.size()) - 1;
+            beginInsertRows(indexForNode(parentNode, 0), first, last);
+            parentNode->children.reserve(parentNode->children.size() +
+                                         static_cast<std::size_t>(batch.size()));
+            for (const ProcessInfo* p : batch) {
+                auto node = std::make_unique<Node>();
+                node->info = *p;
+                node->parent = parentNode;
+                node->rowInParent = static_cast<int>(parentNode->children.size());
+                Node* rawPtr = node.get();
+                parentNode->children.push_back(std::move(node));
+                m_pidToNode.insert(p->pid, rawPtr);
+            }
+            endInsertRows();
+        }
+
+        pendingInsert = std::move(deferred);
+    }
 }
 
 void ProcessTreeModel::rebuildTree(const QVector<ProcessInfo>& processes) {
     emit aboutToRebuild();
     beginResetModel();
 
-    m_nodes.clear();
     m_pidToNode.clear();
-    m_nodes.push_back(Node{}); // Görünmez kök
-
-    m_nodes.reserve(processes.size() + 1);
+    m_root = std::make_unique<Node>();
     m_pidToNode.reserve(processes.size());
 
+    std::vector<std::unique_ptr<Node>> created;
+    created.reserve(static_cast<std::size_t>(processes.size()));
+    std::unordered_map<int, Node*> rawByPid;
+    rawByPid.reserve(static_cast<std::size_t>(processes.size()));
+
     for (const auto& p : processes) {
-        Node n;
-        n.info = p;
-        const int idx = static_cast<int>(m_nodes.size());
-        m_pidToNode.insert(p.pid, idx);
-        m_nodes.push_back(std::move(n));
+        auto n = std::make_unique<Node>();
+        n->info = p;
+        Node* raw = n.get();
+        rawByPid[p.pid] = raw;
+        m_pidToNode.insert(p.pid, raw);
+        created.push_back(std::move(n));
     }
 
-    for (int idx = 1; idx < m_nodes.size(); ++idx) {
-        int parentNodeIdx = 0;
+    for (auto& n : created) {
+        Node* parentNode = m_root.get();
         if (m_treeMode) {
-            const int ppid = m_nodes[idx].info.ppid;
-            if (ppid > 0 && ppid != m_nodes[idx].info.pid) {
-                if (const auto it = m_pidToNode.constFind(ppid); it != m_pidToNode.constEnd()) {
-                    // Döngü koruması
-                    int probe = *it;
+            const int ppid = n->info.ppid;
+            if (ppid > 0 && ppid != n->info.pid) {
+                if (const auto it = rawByPid.find(ppid); it != rawByPid.end()) {
+                    Node* candidate = it->second;
+                    Node* probe = candidate;
                     bool cycle = false;
-                    for (int depth = 0; depth < 64 && probe > 0; ++depth) {
-                        if (probe == idx) {
+                    for (int depth = 0; depth < 64 && probe; ++depth) {
+                        if (probe == n.get()) {
                             cycle = true;
                             break;
                         }
-                        const int nextPpid = m_nodes[probe].info.ppid;
-                        probe = (nextPpid > 0 && m_pidToNode.contains(nextPpid))
-                            ? m_pidToNode.value(nextPpid)
-                            : 0;
+                        const int nextPpid = probe->info.ppid;
+                        if (nextPpid > 0 && nextPpid != probe->info.pid) {
+                            const auto nextIt = rawByPid.find(nextPpid);
+                            probe = (nextIt != rawByPid.end()) ? nextIt->second : nullptr;
+                        } else {
+                            probe = nullptr;
+                        }
                     }
                     if (!cycle) {
-                        parentNodeIdx = *it;
+                        parentNode = candidate;
                     }
                 }
             }
         }
-        m_nodes[idx].parentNode = parentNodeIdx;
-        m_nodes[idx].rowInParent = static_cast<int>(m_nodes[parentNodeIdx].children.size());
-        m_nodes[parentNodeIdx].children.push_back(idx);
+        n->parent = parentNode;
+        n->rowInParent = static_cast<int>(parentNode->children.size());
+        parentNode->children.push_back(std::move(n));
     }
 
     endResetModel();
@@ -400,11 +554,11 @@ const ProcessInfo* ProcessTreeModel::processForIndex(const QModelIndex& index) c
     if (!index.isValid()) {
         return nullptr;
     }
-    const int nodeIdx = static_cast<int>(index.internalId());
-    if (nodeIdx <= 0 || nodeIdx >= m_nodes.size()) {
+    Node* node = nodeFromIndex(index);
+    if (!node || node == m_root.get()) {
         return nullptr;
     }
-    return &m_nodes[nodeIdx].info;
+    return &node->info;
 }
 
 QModelIndex ProcessTreeModel::indexForPid(int pid) const {
@@ -412,11 +566,7 @@ QModelIndex ProcessTreeModel::indexForPid(int pid) const {
     if (it == m_pidToNode.constEnd()) {
         return {};
     }
-    const int nodeIdx = *it;
-    if (nodeIdx <= 0 || nodeIdx >= m_nodes.size()) {
-        return {};
-    }
-    return createIndex(m_nodes[nodeIdx].rowInParent, 0, static_cast<quintptr>(nodeIdx));
+    return indexForNode(*it, 0);
 }
 
 } // namespace sysmon

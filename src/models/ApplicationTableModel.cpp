@@ -27,7 +27,14 @@ int ApplicationTableModel::columnCount(const QModelIndex& parent) const {
 QVariant ApplicationTableModel::headerData(int section,
                                            Qt::Orientation orientation,
                                            int role) const {
-    if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+    if (orientation != Qt::Horizontal) {
+        return {};
+    }
+    if (role == Qt::ToolTipRole && section == ColNetwork) {
+        return trText("Measures TCP traffic only via rootless NETLINK_SOCK_DIAG (excludes UDP/QUIC).",
+                      "Root yetkisi olmadan NETLINK_SOCK_DIAG üzerinden yalnızca TCP trafiği ölçülür (UDP/QUIC hariç).");
+    }
+    if (role != Qt::DisplayRole) {
         return {};
     }
     switch (section) {
@@ -42,7 +49,7 @@ QVariant ApplicationTableModel::headerData(int section,
     case ColDiskIo:
         return trText("Disk I/O", "Disk G/Ç");
     case ColNetwork:
-        return trText("Network", "Ağ");
+        return trText("TCP Network", "TCP Ağı");
     case ColGpuPercent:
         return trText("GPU %", "GPU %");
     case ColGpuVram:

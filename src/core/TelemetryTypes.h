@@ -230,6 +230,7 @@ struct ProcessInfo {
     QString stateText;
     int niceValue{0};
     int threads{1};
+    std::uint64_t startTimeTicks{0};
 
     double cpuPercent{0.0};
     std::uint64_t rssBytes{0};

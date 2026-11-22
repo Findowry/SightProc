@@ -2,6 +2,7 @@
 
 #include <QString>
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 
@@ -29,7 +30,7 @@ struct NvmlDeviceStats {
 
 /**
  * @brief libnvidia-ml.so.1 kütüphanesini çalışma zamanında dlopen ile yükleyen
- *        güvenli NVML köprüsü (derleme zamanı CUDA/NVML bağımlılığı gerektirmez).
+ *        resmi NVML C ABI sürümlemeli (_v2/_v3) köprü.
  */
 class NvmlBridge {
 public:
@@ -47,27 +48,37 @@ public:
     void shutdown();
 
 private:
+    // Resmi nvml.h ABI yapıları (Linux x86_64/aarch64 LP64)
     struct NvmlUtilization {
         unsigned int gpu;
         unsigned int memory;
     };
 
-    struct NvmlMemory {
+    struct NvmlMemoryV1 {
         unsigned long long total;
         unsigned long long free;
         unsigned long long used;
     };
 
-    struct NvmlProcessInfoV3 {
-        unsigned int pid;
-        unsigned long long usedGpuMemory;
-        unsigned int gpuInstanceId;
-        unsigned int computeInstanceId;
+    struct NvmlMemoryV2 {
+        unsigned int version;
+        unsigned long long total;
+        unsigned long long reserved;
+        unsigned long long free;
+        unsigned long long used;
     };
 
     struct NvmlProcessInfoV1 {
         unsigned int pid;
         unsigned long long usedGpuMemory;
+    };
+
+    // Hem _v2 hem _v3 çalışan süreç sorguları tarafından paylaşılan MIG uyumlu düzen
+    struct NvmlProcessInfoV2 {
+        unsigned int pid;
+        unsigned long long usedGpuMemory;
+        unsigned int gpuInstanceId;
+        unsigned int computeInstanceId;
     };
 
     struct NvmlProcessUtilizationSample {
@@ -79,22 +90,40 @@ private:
         unsigned int decUtil;
     };
 
+    static constexpr unsigned int kNvmlMemoryV2Version =
+        static_cast<unsigned int>(sizeof(NvmlMemoryV2) | (2U << 24U));
+
+#if defined(__LP64__)
+    static_assert(sizeof(NvmlUtilization) == 8, "nvmlUtilization_t size mismatch");
+    static_assert(sizeof(NvmlMemoryV1) == 24, "nvmlMemory_t size mismatch");
+    static_assert(sizeof(NvmlMemoryV2) == 40, "nvmlMemory_v2_t size mismatch");
+    static_assert(offsetof(NvmlMemoryV2, reserved) == 16, "nvmlMemory_v2_t layout mismatch");
+    static_assert(sizeof(NvmlProcessInfoV1) == 16, "nvmlProcessInfo_v1_t size mismatch");
+    static_assert(sizeof(NvmlProcessInfoV2) == 24, "nvmlProcessInfo_v2_t size mismatch");
+    static_assert(offsetof(NvmlProcessInfoV2, gpuInstanceId) == 16,
+                  "nvmlProcessInfo_v2_t layout mismatch");
+    static_assert(sizeof(NvmlProcessUtilizationSample) == 32,
+                  "nvmlProcessUtilizationSample_t size mismatch");
+#endif
+
     using NvmlReturn = int;
     using NvmlDevice = void*;
 
-    using FnInitV2 = NvmlReturn (*)();
+    using FnInit = NvmlReturn (*)();
     using FnShutdown = NvmlReturn (*)();
-    using FnDeviceGetCountV2 = NvmlReturn (*)(unsigned int*);
-    using FnDeviceGetHandleByIndexV2 = NvmlReturn (*)(unsigned int, NvmlDevice*);
-    using FnDeviceGetHandleByPciBusIdV2 = NvmlReturn (*)(const char*, NvmlDevice*);
+    using FnDeviceGetCount = NvmlReturn (*)(unsigned int*);
+    using FnDeviceGetHandleByIndex = NvmlReturn (*)(unsigned int, NvmlDevice*);
+    using FnDeviceGetHandleByPciBusId = NvmlReturn (*)(const char*, NvmlDevice*);
     using FnDeviceGetName = NvmlReturn (*)(NvmlDevice, char*, unsigned int);
     using FnDeviceGetUtilizationRates = NvmlReturn (*)(NvmlDevice, NvmlUtilization*);
-    using FnDeviceGetMemoryInfo = NvmlReturn (*)(NvmlDevice, NvmlMemory*);
+    using FnDeviceGetMemoryInfoV1 = NvmlReturn (*)(NvmlDevice, NvmlMemoryV1*);
+    using FnDeviceGetMemoryInfoV2 = NvmlReturn (*)(NvmlDevice, NvmlMemoryV2*);
     using FnDeviceGetTemperature = NvmlReturn (*)(NvmlDevice, unsigned int, unsigned int*);
     using FnDeviceGetClockInfo = NvmlReturn (*)(NvmlDevice, unsigned int, unsigned int*);
     using FnDeviceGetPowerUsage = NvmlReturn (*)(NvmlDevice, unsigned int*);
-    using FnDeviceGetFanSpeed = NvmlReturn (*)(NvmlDevice, unsigned int*);
-    using FnGetRunningProcsV3 = NvmlReturn (*)(NvmlDevice, unsigned int*, NvmlProcessInfoV3*);
+    using FnDeviceGetFanSpeedV1 = NvmlReturn (*)(NvmlDevice, unsigned int*);
+    using FnDeviceGetFanSpeedV2 = NvmlReturn (*)(NvmlDevice, unsigned int, unsigned int*);
+    using FnGetRunningProcsV2 = NvmlReturn (*)(NvmlDevice, unsigned int*, NvmlProcessInfoV2*);
     using FnGetRunningProcsV1 = NvmlReturn (*)(NvmlDevice, unsigned int*, NvmlProcessInfoV1*);
     using FnGetProcessUtilization = NvmlReturn (*)(NvmlDevice,
                                                    NvmlProcessUtilizationSample*,
@@ -105,20 +134,22 @@ private:
     bool m_attemptedInit{false};
     bool m_initialized{false};
 
-    FnInitV2 m_initV2{nullptr};
+    FnInit m_init{nullptr};
     FnShutdown m_shutdown{nullptr};
-    FnDeviceGetCountV2 m_getCountV2{nullptr};
-    FnDeviceGetHandleByIndexV2 m_getHandleByIndexV2{nullptr};
-    FnDeviceGetHandleByPciBusIdV2 m_getHandleByPciBusIdV2{nullptr};
+    FnDeviceGetCount m_getCount{nullptr};
+    FnDeviceGetHandleByIndex m_getHandleByIndex{nullptr};
+    FnDeviceGetHandleByPciBusId m_getHandleByPciBusId{nullptr};
     FnDeviceGetName m_getName{nullptr};
     FnDeviceGetUtilizationRates m_getUtilizationRates{nullptr};
-    FnDeviceGetMemoryInfo m_getMemoryInfo{nullptr};
+    FnDeviceGetMemoryInfoV2 m_getMemoryInfoV2{nullptr};
+    FnDeviceGetMemoryInfoV1 m_getMemoryInfoV1{nullptr};
     FnDeviceGetTemperature m_getTemperature{nullptr};
     FnDeviceGetClockInfo m_getClockInfo{nullptr};
     FnDeviceGetPowerUsage m_getPowerUsage{nullptr};
-    FnDeviceGetFanSpeed m_getFanSpeed{nullptr};
-    FnGetRunningProcsV3 m_getComputeProcsV3{nullptr};
-    FnGetRunningProcsV3 m_getGraphicsProcsV3{nullptr};
+    FnDeviceGetFanSpeedV2 m_getFanSpeedV2{nullptr};
+    FnDeviceGetFanSpeedV1 m_getFanSpeedV1{nullptr};
+    FnGetRunningProcsV2 m_getComputeProcsV2{nullptr};
+    FnGetRunningProcsV2 m_getGraphicsProcsV2{nullptr};
     FnGetRunningProcsV1 m_getComputeProcsV1{nullptr};
     FnGetRunningProcsV1 m_getGraphicsProcsV1{nullptr};
     FnGetProcessUtilization m_getProcessUtilization{nullptr};

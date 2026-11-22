@@ -1,0 +1,34 @@
+# Maintainer: SightProc Contributors
+# SightProc Arch Linux PKGBUILD
+# After tagging v1.0.0 on GitHub, update sha256sums with `updpkgsums`.
+
+pkgname=sightproc
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Qt6 Widgets C++20 based GNU/Linux system monitor'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Findowry/SightProc'
+license=('MIT-0')
+depends=('qt6-base' 'qt6-svg' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja')
+optdepends=(
+    'polkit: elevated process signals, renice, and systemd service actions'
+    'nvidia-utils: runtime NVML telemetry for NVIDIA GPUs'
+    'kvantum: native translucent Kvantum theming'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cmake -B build -S "SightProc-$pkgver" -G Ninja \
+        -DCMAKE_BUILD_TYPE=None \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -Wno-dev
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "SightProc-$pkgver/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

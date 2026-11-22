@@ -31,6 +31,17 @@ bool loadSymbol(void* handle, const char* name, Fn& outFn) {
     return true;
 }
 
+template <typename Fn>
+bool loadVersionedSymbol(void* handle,
+                           const char* primaryName,
+                           const char* fallbackName,
+                           Fn& outFn) {
+    if (loadSymbol(handle, primaryName, outFn)) {
+        return true;
+    }
+    return fallbackName && loadSymbol(handle, fallbackName, outFn);
+}
+
 template <typename ProcStruct, typename QueryFn>
 void collectRunningProcMemory(void* dev,
                               QueryFn fn,
@@ -42,7 +53,9 @@ void collectRunningProcMemory(void* dev,
     std::vector<ProcStruct> procs(count);
     int ret = fn(dev, &count, procs.data());
     if (ret == kNvmlErrorInsufficientSize && count > 0 && count <= 4096) {
-        procs.resize(count);
+        const unsigned int allocCount = std::min<unsigned int>(count + 16U, 4096U);
+        procs.resize(allocCount);
+        count = allocCount;
         ret = fn(dev, &count, procs.data());
     }
     if (ret == kNvmlSuccess) {
@@ -112,30 +125,44 @@ bool NvmlBridge::ensureInitialized() {
         return false;
     }
 
-    const bool hasInit = loadSymbol(m_handle, "nvmlInit_v2", m_initV2);
+    const bool hasInit = loadVersionedSymbol(m_handle, "nvmlInit_v2", "nvmlInit", m_init);
     loadSymbol(m_handle, "nvmlShutdown", m_shutdown);
-    loadSymbol(m_handle, "nvmlDeviceGetCount_v2", m_getCountV2);
-    loadSymbol(m_handle, "nvmlDeviceGetHandleByIndex_v2", m_getHandleByIndexV2);
-    loadSymbol(m_handle, "nvmlDeviceGetHandleByPciBusId_v2", m_getHandleByPciBusIdV2);
+    loadVersionedSymbol(m_handle, "nvmlDeviceGetCount_v2", "nvmlDeviceGetCount", m_getCount);
+    loadVersionedSymbol(m_handle,
+                        "nvmlDeviceGetHandleByIndex_v2",
+                        "nvmlDeviceGetHandleByIndex",
+                        m_getHandleByIndex);
+    loadVersionedSymbol(m_handle,
+                        "nvmlDeviceGetHandleByPciBusId_v2",
+                        "nvmlDeviceGetHandleByPciBusId",
+                        m_getHandleByPciBusId);
     loadSymbol(m_handle, "nvmlDeviceGetName", m_getName);
     loadSymbol(m_handle, "nvmlDeviceGetUtilizationRates", m_getUtilizationRates);
-    loadSymbol(m_handle, "nvmlDeviceGetMemoryInfo", m_getMemoryInfo);
+    loadSymbol(m_handle, "nvmlDeviceGetMemoryInfo_v2", m_getMemoryInfoV2);
+    loadSymbol(m_handle, "nvmlDeviceGetMemoryInfo", m_getMemoryInfoV1);
     loadSymbol(m_handle, "nvmlDeviceGetTemperature", m_getTemperature);
     loadSymbol(m_handle, "nvmlDeviceGetClockInfo", m_getClockInfo);
     loadSymbol(m_handle, "nvmlDeviceGetPowerUsage", m_getPowerUsage);
-    loadSymbol(m_handle, "nvmlDeviceGetFanSpeed", m_getFanSpeed);
+    loadSymbol(m_handle, "nvmlDeviceGetFanSpeed_v2", m_getFanSpeedV2);
+    loadSymbol(m_handle, "nvmlDeviceGetFanSpeed", m_getFanSpeedV1);
 
-    if (!loadSymbol(m_handle, "nvmlDeviceGetComputeRunningProcesses_v3", m_getComputeProcsV3)) {
+    if (!loadVersionedSymbol(m_handle,
+                             "nvmlDeviceGetComputeRunningProcesses_v3",
+                             "nvmlDeviceGetComputeRunningProcesses_v2",
+                             m_getComputeProcsV2)) {
         loadSymbol(m_handle, "nvmlDeviceGetComputeRunningProcesses", m_getComputeProcsV1);
     }
-    if (!loadSymbol(m_handle, "nvmlDeviceGetGraphicsRunningProcesses_v3", m_getGraphicsProcsV3)) {
+    if (!loadVersionedSymbol(m_handle,
+                             "nvmlDeviceGetGraphicsRunningProcesses_v3",
+                             "nvmlDeviceGetGraphicsRunningProcesses_v2",
+                             m_getGraphicsProcsV2)) {
         loadSymbol(m_handle, "nvmlDeviceGetGraphicsRunningProcesses", m_getGraphicsProcsV1);
     }
     loadSymbol(m_handle, "nvmlDeviceGetProcessUtilization", m_getProcessUtilization);
 
-    if (!hasInit || m_initV2() != kNvmlSuccess) {
-        dlclose(m_handle);
-        m_handle = nullptr;
+    if (!hasInit || m_init() != kNvmlSuccess) {
+        shutdown();
+        m_attemptedInit = true;
         return false;
     }
 
@@ -149,17 +176,17 @@ bool NvmlBridge::queryDeviceByPciBusId(const QString& pciSlot, NvmlDeviceStats& 
     }
 
     NvmlDevice dev = nullptr;
-    if (m_getHandleByPciBusIdV2 && !pciSlot.isEmpty()) {
+    if (m_getHandleByPciBusId && !pciSlot.isEmpty()) {
         const QByteArray slotBytes = pciSlot.toLatin1();
-        if (m_getHandleByPciBusIdV2(slotBytes.constData(), &dev) != kNvmlSuccess) {
+        if (m_getHandleByPciBusId(slotBytes.constData(), &dev) != kNvmlSuccess) {
             dev = nullptr;
         }
     }
 
-    if (!dev && m_getCountV2 && m_getHandleByIndexV2) {
+    if (!dev && m_getCount && m_getHandleByIndex) {
         unsigned int count = 0;
-        if (m_getCountV2(&count) == kNvmlSuccess && count == 1) {
-            if (m_getHandleByIndexV2(0, &dev) != kNvmlSuccess) {
+        if (m_getCount(&count) == kNvmlSuccess && count == 1) {
+            if (m_getHandleByIndex(0, &dev) != kNvmlSuccess) {
                 dev = nullptr;
             }
         }
@@ -172,6 +199,7 @@ bool NvmlBridge::queryDeviceByPciBusId(const QString& pciSlot, NvmlDeviceStats& 
     if (m_getName) {
         char nameBuf[96] = {};
         if (m_getName(dev, nameBuf, sizeof(nameBuf)) == kNvmlSuccess) {
+            nameBuf[sizeof(nameBuf) - 1] = '\0';
             out.name = QString::fromUtf8(nameBuf);
         }
     }
@@ -184,11 +212,21 @@ bool NvmlBridge::queryDeviceByPciBusId(const QString& pciSlot, NvmlDeviceStats& 
         }
     }
 
-    if (m_getMemoryInfo) {
-        NvmlMemory mem{};
-        if (m_getMemoryInfo(dev, &mem) == kNvmlSuccess) {
-            out.vramUsedBytes = static_cast<std::uint64_t>(mem.used);
-            out.vramTotalBytes = static_cast<std::uint64_t>(mem.total);
+    bool gotMemory = false;
+    if (m_getMemoryInfoV2) {
+        NvmlMemoryV2 memV2{};
+        memV2.version = kNvmlMemoryV2Version;
+        if (m_getMemoryInfoV2(dev, &memV2) == kNvmlSuccess) {
+            out.vramUsedBytes = static_cast<std::uint64_t>(memV2.used);
+            out.vramTotalBytes = static_cast<std::uint64_t>(memV2.total);
+            gotMemory = true;
+        }
+    }
+    if (!gotMemory && m_getMemoryInfoV1) {
+        NvmlMemoryV1 memV1{};
+        if (m_getMemoryInfoV1(dev, &memV1) == kNvmlSuccess) {
+            out.vramUsedBytes = static_cast<std::uint64_t>(memV1.used);
+            out.vramTotalBytes = static_cast<std::uint64_t>(memV1.total);
         }
     }
 
@@ -216,22 +254,30 @@ bool NvmlBridge::queryDeviceByPciBusId(const QString& pciSlot, NvmlDeviceStats& 
         }
     }
 
-    if (m_getFanSpeed) {
+    bool gotFan = false;
+    if (m_getFanSpeedV2) {
         unsigned int fanPct = 0;
-        if (m_getFanSpeed(dev, &fanPct) == kNvmlSuccess) {
+        if (m_getFanSpeedV2(dev, 0U, &fanPct) == kNvmlSuccess) {
+            out.fanPercent = static_cast<double>(fanPct);
+            gotFan = true;
+        }
+    }
+    if (!gotFan && m_getFanSpeedV1) {
+        unsigned int fanPct = 0;
+        if (m_getFanSpeedV1(dev, &fanPct) == kNvmlSuccess) {
             out.fanPercent = static_cast<double>(fanPct);
         }
     }
 
     std::unordered_map<std::uint32_t, std::uint64_t> procMem;
-    if (m_getComputeProcsV3) {
-        collectRunningProcMemory<NvmlProcessInfoV3>(dev, m_getComputeProcsV3, procMem);
+    if (m_getComputeProcsV2) {
+        collectRunningProcMemory<NvmlProcessInfoV2>(dev, m_getComputeProcsV2, procMem);
     } else if (m_getComputeProcsV1) {
         collectRunningProcMemory<NvmlProcessInfoV1>(dev, m_getComputeProcsV1, procMem);
     }
 
-    if (m_getGraphicsProcsV3) {
-        collectRunningProcMemory<NvmlProcessInfoV3>(dev, m_getGraphicsProcsV3, procMem);
+    if (m_getGraphicsProcsV2) {
+        collectRunningProcMemory<NvmlProcessInfoV2>(dev, m_getGraphicsProcsV2, procMem);
     } else if (m_getGraphicsProcsV1) {
         collectRunningProcMemory<NvmlProcessInfoV1>(dev, m_getGraphicsProcsV1, procMem);
     }
@@ -246,29 +292,29 @@ NvmlBridge::queryAllProcessMetrics(bool probeSleepingGpus) {
     if (!hasAwakeNvidiaCard(probeSleepingGpus)) {
         return out;
     }
-    if (!ensureInitialized() || !m_getCountV2 || !m_getHandleByIndexV2) {
+    if (!ensureInitialized() || !m_getCount || !m_getHandleByIndex) {
         return out;
     }
 
     unsigned int count = 0;
-    if (m_getCountV2(&count) != kNvmlSuccess || count == 0) {
+    if (m_getCount(&count) != kNvmlSuccess || count == 0) {
         return out;
     }
 
     for (unsigned int devIdx = 0; devIdx < count; ++devIdx) {
         NvmlDevice dev = nullptr;
-        if (m_getHandleByIndexV2(devIdx, &dev) != kNvmlSuccess || !dev) {
+        if (m_getHandleByIndex(devIdx, &dev) != kNvmlSuccess || !dev) {
             continue;
         }
 
         std::unordered_map<std::uint32_t, std::uint64_t> procMem;
-        if (m_getComputeProcsV3) {
-            collectRunningProcMemory<NvmlProcessInfoV3>(dev, m_getComputeProcsV3, procMem);
+        if (m_getComputeProcsV2) {
+            collectRunningProcMemory<NvmlProcessInfoV2>(dev, m_getComputeProcsV2, procMem);
         } else if (m_getComputeProcsV1) {
             collectRunningProcMemory<NvmlProcessInfoV1>(dev, m_getComputeProcsV1, procMem);
         }
-        if (m_getGraphicsProcsV3) {
-            collectRunningProcMemory<NvmlProcessInfoV3>(dev, m_getGraphicsProcsV3, procMem);
+        if (m_getGraphicsProcsV2) {
+            collectRunningProcMemory<NvmlProcessInfoV2>(dev, m_getGraphicsProcsV2, procMem);
         } else if (m_getGraphicsProcsV1) {
             collectRunningProcMemory<NvmlProcessInfoV1>(dev, m_getGraphicsProcsV1, procMem);
         }
@@ -285,7 +331,9 @@ NvmlBridge::queryAllProcessMetrics(bool probeSleepingGpus) {
             const unsigned long long lastTs = m_lastUtilTsUs[devIdx];
             int ret = m_getProcessUtilization(dev, samples.data(), &sampleCount, lastTs);
             if (ret == kNvmlErrorInsufficientSize && sampleCount > 0 && sampleCount <= 4096) {
-                samples.resize(sampleCount);
+                const unsigned int allocCount = std::min<unsigned int>(sampleCount + 16U, 4096U);
+                samples.resize(allocCount);
+                sampleCount = allocCount;
                 ret = m_getProcessUtilization(dev, samples.data(), &sampleCount, lastTs);
             }
             if (ret == kNvmlSuccess) {
@@ -316,6 +364,27 @@ void NvmlBridge::shutdown() {
         m_shutdown();
     }
     m_initialized = false;
+    m_attemptedInit = false;
+    m_init = nullptr;
+    m_shutdown = nullptr;
+    m_getCount = nullptr;
+    m_getHandleByIndex = nullptr;
+    m_getHandleByPciBusId = nullptr;
+    m_getName = nullptr;
+    m_getUtilizationRates = nullptr;
+    m_getMemoryInfoV2 = nullptr;
+    m_getMemoryInfoV1 = nullptr;
+    m_getTemperature = nullptr;
+    m_getClockInfo = nullptr;
+    m_getPowerUsage = nullptr;
+    m_getFanSpeedV2 = nullptr;
+    m_getFanSpeedV1 = nullptr;
+    m_getComputeProcsV2 = nullptr;
+    m_getGraphicsProcsV2 = nullptr;
+    m_getComputeProcsV1 = nullptr;
+    m_getGraphicsProcsV1 = nullptr;
+    m_getProcessUtilization = nullptr;
+    m_lastUtilTsUs.clear();
     if (m_handle) {
         dlclose(m_handle);
         m_handle = nullptr;
