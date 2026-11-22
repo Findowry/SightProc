@@ -73,15 +73,22 @@ A native GNU/Linux system monitor and process manager built with C++20 and Qt6 W
 
 ## Installation
 
-### AppImage (x86_64)
+### AppImage for Systems with Qt installed (x86_64)
 
-Download `SightProc-x86_64.AppImage` from the [GitHub Releases](https://github.com/Findowry/SightProc/releases) page, mark it executable, and run:
+This version requires Qt6 version 6.10+ installed (including qt6-svg for the SVG icon) on your system to work. Download `SightProc-x86_64.AppImage` from the [GitHub Releases](https://github.com/Findowry/SightProc/releases) page, mark it executable, and run:
 
 ```bash
 chmod +x SightProc-x86_64.AppImage
 ./SightProc-x86_64.AppImage
 ```
 
+### AppImage for Legacy Systems without Qt 6.10+ installed and runs under glibc 2.39 (x86_64)
+Download `SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage` from the [GitHub Releases](https://github.com/Findowry/SightProc/releases) page, mark it executable, and run:
+```bash
+chmod +x SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
+./SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
+```
+> **Important:** GitHub Actions started deprecating ubuntu-22.04 on 2026-09-17 (retires 2027-04-17). I will keep this version and release new versions for glibc 2.35 legacy AppImage compatibility until March 2027. Also, this version is not the pure src version, it is patched to be compatible with Qt 6.9 instead of the project's 6.10+ target. This version also has Qt libraries bundled in it, so it'll work everywhere. **This version doesn't offer any customization, and it comes with Fusion.** This is against my principles and project's philosophy but I'll maintain it for systems don't have Qt and older systems like Debian 12.
 ### Arch Linux (`PKGBUILD`)
 
 An Arch Linux package definition is provided at [`packaging/PKGBUILD`](packaging/PKGBUILD). To build and install locally from the release tarball (or adapt `source` for a local checkout):
@@ -93,7 +100,7 @@ makepkg -si
 
 ### Build from Source (CMake + Ninja)
 
-SightProc requires a C++20 compiler (like G++ or Clang++), CMake (`>= 3.22`), Ninja, and Qt 6 (`Qt6::Widgets`, plus `qt6-svg` at runtime for the SVG icon; Qt `>= 6.9` is used for `QSortFilterProxyModel::beginFilterChange`/`endFilterChange`).
+SightProc requires a C++20 compiler (like G++ or Clang++), CMake (`>= 3.22`), Ninja, and Qt 6 (`Qt6::Widgets`, plus `qt6-svg` at runtime for the SVG icon; Qt `>= 6.10` is used for `QSortFilterProxyModel::beginFilterChange`/`endFilterChange`).
 
 Install dependencies on Arch Linux:
 
