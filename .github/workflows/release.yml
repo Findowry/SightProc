@@ -6,14 +6,12 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    name: Build and Release SightProc (x86_64 AppImage)
-    # GitHub started deprecating ubuntu-22.04 on 2026-09-17 (retires 2027-04-17).
-    # Keeping it now for glibc 2.35 AppImage compatibility; switch to ubuntu-24.04 before March 2027.
-    runs-on: ubuntu-22.04
+  build-normal:
+    name: Build SightProc AppImage (Ubuntu 24.04 / Qt 6.10)
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -34,11 +32,11 @@ jobs:
             libxcb-cursor0 \
             libwayland-dev
 
-      - name: Install Qt 6
+      - name: Install Qt 6.10
         id: install-qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.9.*'
+          version: '6.10.*'
           host: 'linux'
           target: 'desktop'
           arch: 'linux_gcc_64'
@@ -62,7 +60,6 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           EXTRA_QT_MODULES: 'svg;waylandcompositor'
-          EXTRA_PLATFORM_PLUGINS: 'libqwayland-egl.so;libqwayland-generic.so'
           LDAI_OUTPUT: 'SightProc-x86_64.AppImage'
           VERSION: ${{ github.ref_name }}
         run: |
@@ -70,6 +67,18 @@ jobs:
           if [ ! -x "$QMAKE" ]; then
             QMAKE="$(command -v qmake6 || command -v qmake)"
           fi
+          QT_PLUGINS_DIR="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
+          WAYLAND_PLUGINS=()
+          for plugin in "$QT_PLUGINS_DIR"/platforms/libqwayland*.so; do
+            if [ -f "$plugin" ]; then
+              WAYLAND_PLUGINS+=("$(basename "$plugin")")
+            fi
+          done
+          if [ "${#WAYLAND_PLUGINS[@]}" -gt 0 ]; then
+            EXTRA_PLATFORM_PLUGINS="$(IFS=';'; echo "${WAYLAND_PLUGINS[*]}")"
+            export EXTRA_PLATFORM_PLUGINS
+          fi
+          echo "Detected Wayland platform plugins: ${EXTRA_PLATFORM_PLUGINS:-<none>}"
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --executable AppDir/usr/bin/sightproc \
@@ -80,9 +89,142 @@ jobs:
           test -f SightProc-x86_64.AppImage
           ls -lh SightProc-x86_64.AppImage
 
+      - name: Upload Normal AppImage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sightproc-appimage-normal
+          path: SightProc-x86_64.AppImage
+          if-no-files-found: error
+          retention-days: 1
+
+  build-legacy:
+    name: Build SightProc Legacy AppImage (Ubuntu 22.04 / Qt 6.9 / glibc 2.35)
+    # GitHub started deprecating ubuntu-22.04 on 2026-09-17 (retires 2027-04-17).
+    # Keeping it for glibc 2.35 legacy AppImage compatibility until ubuntu-22.04 retires.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install system build and Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            patchelf \
+            wget \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libxkbcommon-dev \
+            libxcb-cursor0 \
+            libwayland-dev
+
+      - name: Install Qt 6.9
+        id: install-qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.9.*'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+          cache: true
+
+      - name: Apply CI-only Qt 6.9 compatibility patch
+        run: |
+          sed -i \
+            -e '/beginFilterChange();/d' \
+            -e 's/endFilterChange(QSortFilterProxyModel::Direction::Rows);/invalidateRowsFilter();/g' \
+            src/models/ProcessFilterProxyModel.cpp \
+            src/models/ServiceTableModel.cpp
+          ! grep -nE 'beginFilterChange|endFilterChange' \
+            src/models/ProcessFilterProxyModel.cpp \
+            src/models/ServiceTableModel.cpp
+          git diff --stat
+
+      - name: Configure and build SightProc
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build --parallel
+          DESTDIR="$PWD/AppDir" cmake --install build
+
+      - name: Download linuxdeploy and Qt plugin
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+      - name: Build SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          EXTRA_QT_MODULES: 'svg;waylandcompositor'
+          LDAI_OUTPUT: 'SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage'
+          VERSION: ${{ github.ref_name }}
+        run: |
+          export QMAKE="${{ steps.install-qt.outputs.qt-root-dir }}/bin/qmake"
+          if [ ! -x "$QMAKE" ]; then
+            QMAKE="$(command -v qmake6 || command -v qmake)"
+          fi
+          QT_PLUGINS_DIR="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
+          WAYLAND_PLUGINS=()
+          for plugin in "$QT_PLUGINS_DIR"/platforms/libqwayland*.so; do
+            if [ -f "$plugin" ]; then
+              WAYLAND_PLUGINS+=("$(basename "$plugin")")
+            fi
+          done
+          if [ "${#WAYLAND_PLUGINS[@]}" -gt 0 ]; then
+            EXTRA_PLATFORM_PLUGINS="$(IFS=';'; echo "${WAYLAND_PLUGINS[*]}")"
+            export EXTRA_PLATFORM_PLUGINS
+          fi
+          echo "Detected Wayland platform plugins: ${EXTRA_PLATFORM_PLUGINS:-<none>}"
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/sightproc \
+            --desktop-file AppDir/usr/share/applications/sightproc.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/sightproc.svg \
+            --plugin qt \
+            --output appimage
+          test -f SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+          ls -lh SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+
+      - name: Upload Legacy AppImage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sightproc-appimage-legacy
+          path: SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-normal, build-legacy]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download built AppImage artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: sightproc-appimage-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify AppImage files
+        run: |
+          test -f dist/SightProc-x86_64.AppImage
+          test -f dist/SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+          ls -lh dist/
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: SightProc-x86_64.AppImage
+          files: |
+            dist/SightProc-x86_64.AppImage
+            dist/SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
