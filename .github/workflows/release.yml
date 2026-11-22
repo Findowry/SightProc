@@ -11,11 +11,13 @@ permissions:
 jobs:
   release:
     name: Build and Release SightProc (x86_64 AppImage)
+    # GitHub started deprecating ubuntu-22.04 on 2026-09-17 (retires 2027-04-17).
+    # Keeping it now for glibc 2.35 AppImage compatibility; switch to ubuntu-24.04 before March 2027.
     runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system build and Qt runtime dependencies
         run: |
@@ -31,7 +33,8 @@ jobs:
             libxkbcommon-dev \
             libxcb-cursor0 \
             libwayland-dev
-- name: Install Qt 6
+
+      - name: Install Qt 6
         id: install-qt
         uses: jurplel/install-qt-action@v4
         with:
@@ -58,7 +61,7 @@ jobs:
       - name: Build SightProc-x86_64.AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-          EXTRA_QT_MODULES: 'svg;wayland'
+          EXTRA_QT_MODULES: 'svg;waylandcompositor'
           EXTRA_PLATFORM_PLUGINS: 'libqwayland-egl.so;libqwayland-generic.so'
           LDAI_OUTPUT: 'SightProc-x86_64.AppImage'
           VERSION: ${{ github.ref_name }}
@@ -78,7 +81,8 @@ jobs:
           ls -lh SightProc-x86_64.AppImage
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: SightProc-x86_64.AppImage
