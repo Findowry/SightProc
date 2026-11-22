@@ -31,7 +31,6 @@ jobs:
             libxkbcommon-dev \
             libxcb-cursor0 \
             libwayland-dev
-
 - name: Install Qt 6
         id: install-qt
         uses: jurplel/install-qt-action@v4
