@@ -3,24 +3,42 @@
 A native GNU/Linux system monitor and process manager built with C++20 and Qt6 Widgets.
 
 ## Screenshots
+![Performance tab with Breeze Light](docs/screenshots/performance.png)
+*Performance tab with Breeze Light*
 
-- *Performance tab screenshot placeholder (`docs/screenshots/performance.png`)*
-- *Applications tab screenshot placeholder (`docs/screenshots/applications.png`)*
-- *Processes tab screenshot placeholder (`docs/screenshots/processes.png`)*
-- *Services tab screenshot placeholder (`docs/screenshots/services.png`)*
+![Processes tab with Oxygen Light](docs/screenshots/process.png)
+*Processes tab with Oxygen Light* 
 
-## Design Philosophy (Zero-QSS)
 
-SightProc intentionally avoids Qt Style Sheets (`setStyleSheet()`), hardcoded widget colors, and child-widget `WA_TranslucentBackground` attributes:
 
+<details>
+<summary>More screenshots (My blurry setup, Services, Processes...)</summary>
+
+![Performance tab with my setup](docs/screenshots/withblurandrice.png)
+*Performance tab with my Kvantum blur setup*
+
+![Detailed processes tab](docs/screenshots/more.png)
+*Detailed processes tab*
+
+![Services tab with Breeze Dark](docs/screenshots/service.png)
+*Services tab with Breeze Dark*
+
+</details>
+
+## Design Philosophy 
+
+**SightProc gives you full control over your theming.** No QSS, no QML, no restrictive theming and just pure QStyle. You should decide how apps should look on your device, not the developer. (also low ram usage thanks to that)
 - **Native `QStyle` & `QPalette`:** All controls follow the desktop's active style engine (such as **Kvantum**, **Breeze**, or **Oxygen**) and system color palette without overrides.
 - **Custom `QPainter` Charts:** Live performance charts are implemented directly as `QWidget` subclasses without external charting dependencies. Series colors, tooltips, and translucent table palettes derive dynamically from the active application palette.
-- **Translucent Surfaces:** List and table views expose an adjustable opacity setting (`0%–100%`) so background blur effects can pass through cleanly when supported by the active theme.
+- **Translucent Surfaces and Blur Support:** List and table views expose an adjustable opacity setting (`0%–100%`) so background blur effects can pass through cleanly when supported by the active theme and compositor.
+- **Powerful When Needed:** SightProc is at first look easy to learn and use; and powerful and detailed when you need it.
+- **Windows Task Manager Like Design:** The design in performance tab is inspired by Windows 8+ Task Manager and Mission Center and the design in processes tab is inspired by Windows 8+ Task Manager, Mission Center and GNOME/MATE System Monitor.
+- **I Made The Icon:** I'm bad at drawing. I know. I didn't want to also vibe code the SVG icon. (although most of this readme is also llm written, i changed it a bit)
 
 ## Features
 
 - **Performance Tab**
-  - Hardware list with mini sparklines: **CPU** (total utilization + toggleable logical core grid), **Memory & Swap/ZRAM**, **Disks / NVMe**, **Network Interfaces**, **GPUs**, **hwmon Fans**, **Batteries** (`/sys/class/power_supply`, shown when present), and **Thermal Sensors**.
+  - Hardware list with mini sparklines: **CPU** (total utilization + toggleable logical core grid), **Memory & Swap/ZRAM**, **Disks / NVMe**, **Network Interfaces**, **GPUs**, **hwmon Fans**, **Batteries**, and **Thermal Sensors**.
   - Multi-series `hwmon` thermal sensor selection: plot specific temperature sensors together on the main chart from either the sensor table checkboxes or **+ Select Sensors**.
   - Additional per-device indicator charts separated by resizable vertical splitters (`QSplitter`) and customizable technical spec rows.
   - Optional smooth-sliding chart updates matched to the active refresh rate and floating numeric hover callouts.
@@ -30,25 +48,28 @@ SightProc intentionally avoids Qt Style Sheets (`setStyleSheet()`), hardcoded wi
   - Groups desktop applications using `.desktop` entries and `cgroup` hierarchy, summing per-app **CPU %**, **Memory (RAM)**, **Shared Memory**, **Disk I/O**, **TCP Network**, **GPU %**, and **VRAM**.
 
 - **Processes Tab**
-  - Reads `/proc` across the full system process table with expandable PPID hierarchy (`ProcessTreeModel`) or flat list view, icon resolution, binary/script name restoration beyond Linux's 15-byte `comm` limit, search box, quick filters, and live `/proc` details dialog (`Details...`).
-  - Uses hybrid incremental model updates (`beginInsertRows`, `beginRemoveRows`, `dataChanged`) and falls back safely to a model reset on mode switches, PID reuse (`starttime` change), or kernel reparenting.
-  - Context menu supports all POSIX `SIG*` signals, custom `nice` priority changes (`-20..19`), `pkexec` elevation when required, and PID-reuse protection via `pidfd_open` / `pidfd_send_signal` plus `/proc/[pid]/stat` `starttime` verification.
+  - Reads `/proc` across the full system process table with expandable PPID tree hierarchy (`ProcessTreeModel`) or flat list view, desktop icon resolution, and full binary/script name restoration beyond Linux's 15-byte `comm` limit.
+  - Uses hybrid incremental model updates (`beginInsertRows`, `beginRemoveRows`, `dataChanged`) to avoid full table resets on routine process churn, falling back safely to a reset on mode switches, PID reuse, or reparenting.
+  - Full process control via context menu: all POSIX `SIG*` signals, custom `nice` priority (`-20..19`), and `pkexec` elevation when needed—protected against PID reuse using `pidfd_open`/`pidfd_send_signal` and `/proc/[pid]/stat` `starttime` verification.
+  - Includes live search, quick filters, and a **Details...** dialog exposing `/proc` memory breakdowns, environment variables, open file descriptors/sockets, and more.
 
 - **Services Tab**
-  - Lists `systemd` system and user service units via `systemctl`, supports start/stop/restart actions, and displays `journalctl` output for the selected unit.
+  - Lists `systemd` system and user service units via `systemctl`, supports start/stop/restart actions, and displays `journalctl` output for the selected unit. sorry, it's systemd only.
 
 - **Preferences & Desktop Integration**
-  - Configurable refresh interval in the `500 ms–5 s` range (`500 ms`, `1 s`, `2 s`, `3 s` selectable in the UI; `500–5000 ms` supported in `~/.config/sightproc/sightproc.conf`).
-  - Instant English and Turkish UI switching persisted alongside scale factors (`Ctrl` + Mouse Wheel per tab) in `~/.config/sightproc/sightproc.conf`, with a direct **Edit -> Config Directory** shortcut.
+  - Configurable refresh interval in the `500 ms–5 s` range (`500 ms`, `1 s`, `2 s`, `3 s` selectable in the UI); `500–5000 ms` supported.
+  - Instant English and Turkish UI switching persisted alongside scale factors. (`Ctrl` + Mouse Wheel per tab)
   - Status bar displays the active Qt style alongside the detected display session compositor or window manager (`<comm> (Wayland)` via `SO_PEERCRED` or `<comm> (X11)` via dynamically loaded `libX11.so.6` `_NET_WM_PID`).
-
-> **Note on TCP Network Accounting:** The **TCP Network** column in the **Applications** and **Processes** tabs measures per-process TCP socket traffic via rootless `NETLINK_SOCK_DIAG`; UDP and QUIC traffic are excluded. Interface-level charts in the **Performance** tab report total RX/TX counters from `/sys/class/net`.
-
+  - Customizing the colors under performance tab is supported.
+  - Config files are saved under `~/.config/sightproc/sightproc.conf`
+   I love XDG standards.
+- **and more! :P**
 ## Tested Environment
 
 - **OS:** Arch Linux
 - **Desktop:** KDE Plasma (Wayland)
-- **Styles tested:** Kvantum, Breeze
+- **Styles tested:** Breeze, Oxygen, My Kvantum theme setup
+- **Device:** Laptop (Intel Core i7-13700H, NVIDIA GeForce RTX 4070 Laptop)
 
 ## Installation
 
@@ -72,7 +93,7 @@ makepkg -si
 
 ### Build from Source (CMake + Ninja)
 
-SightProc requires a C++20 compiler, CMake (`>= 3.22`), Ninja, and Qt 6 (`Qt6::Widgets`, plus `qt6-svg` at runtime for the SVG icon; Qt `>= 6.9` is used for `QSortFilterProxyModel::beginFilterChange`/`endFilterChange`).
+SightProc requires a C++20 compiler (like G++ or Clang++), CMake (`>= 3.22`), Ninja, and Qt 6 (`Qt6::Widgets`, plus `qt6-svg` at runtime for the SVG icon; Qt `>= 6.9` is used for `QSortFilterProxyModel::beginFilterChange`/`endFilterChange`).
 
 Install dependencies on Arch Linux:
 
@@ -101,7 +122,10 @@ sudo cmake --install build --prefix /usr
 
 ## AI-Assisted Development Notice
 
-SightProc's architecture, telemetry scope, Zero-QSS design constraints, and user experience were designed and directed by a human author. The C++20 and Qt6 Widgets source code was generated using LLM coding agents.
+SightProc's architecture, telemetry scope, Zero-QSS design constraints, and user experience were designed and directed by a human author. The C++20 and Qt6 Widgets source code was %100 generated using LLM coding agents. (No, not Claude)
+
+## Why Did I Start This Project?
+I wanted a system monitor that was fast, lightweight, detailed, and respects my system theme. KDE System Monitor wasn't fast and didn't care much about my theme. Mission Center was almost the thing I wanted. It looked Windows-like on the performance tab and it was not basic (but also not as detailed as SightProc). Since it was originally a GTK4/Libadwaita app, I used it by changing .config/gtk-4.0/gtk.css but still, it didn't look that much of my system theme. Also, I liked how GNOME/MATE System Monitors can show more details and are fast. So, with vibe coding, this project was born.
 
 ## License
 
