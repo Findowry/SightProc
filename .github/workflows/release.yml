@@ -10,26 +10,24 @@ permissions:
 
 jobs:
   build-normal:
-    name: Build SightProc AppImage (Ubuntu 24.04 / Qt 6.10)
+    name: Build SightProc AppImage (System-Qt / Full Theming)
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Install system build and Qt runtime dependencies
+      - name: Install system build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
             ninja-build \
-            patchelf \
             wget \
             libgl1-mesa-dev \
             libegl1-mesa-dev \
             libxkbcommon-dev \
-            libxcb-cursor0 \
             libwayland-dev
 
       - name: Install Qt 6.10
@@ -46,50 +44,39 @@ jobs:
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_SKIP_INSTALL_RPATH=ON
           cmake --build build --parallel
           DESTDIR="$PWD/AppDir" cmake --install build
 
-      - name: Download linuxdeploy and Qt plugin
+      - name: Prepare System-Qt AppDir
         run: |
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+          cp AppDir/usr/share/applications/sightproc.desktop AppDir/SightProc.desktop
+          cp AppDir/usr/share/icons/hicolor/scalable/apps/sightproc.svg AppDir/sightproc.svg
+          cat <<'EOF' > AppDir/AppRun
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/sightproc" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          test -z "$(find AppDir \( -name 'libQt6*' -o -name 'qt.conf' \))"
+
+      - name: Download appimagetool
+        run: |
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
 
       - name: Build SightProc-x86_64.AppImage
         env:
+          ARCH: 'x86_64'
           APPIMAGE_EXTRACT_AND_RUN: '1'
-          EXTRA_QT_MODULES: 'svg;waylandcompositor'
-          LDAI_OUTPUT: 'SightProc-x86_64.AppImage'
           VERSION: ${{ github.ref_name }}
         run: |
-          export QMAKE="${{ steps.install-qt.outputs.qt-root-dir }}/bin/qmake"
-          if [ ! -x "$QMAKE" ]; then
-            QMAKE="$(command -v qmake6 || command -v qmake)"
-          fi
-          QT_PLUGINS_DIR="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
-          WAYLAND_PLUGINS=()
-          for plugin in "$QT_PLUGINS_DIR"/platforms/libqwayland*.so; do
-            if [ -f "$plugin" ]; then
-              WAYLAND_PLUGINS+=("$(basename "$plugin")")
-            fi
-          done
-          if [ "${#WAYLAND_PLUGINS[@]}" -gt 0 ]; then
-            EXTRA_PLATFORM_PLUGINS="$(IFS=';'; echo "${WAYLAND_PLUGINS[*]}")"
-            export EXTRA_PLATFORM_PLUGINS
-          fi
-          echo "Detected Wayland platform plugins: ${EXTRA_PLATFORM_PLUGINS:-<none>}"
-          ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --executable AppDir/usr/bin/sightproc \
-            --desktop-file AppDir/usr/share/applications/sightproc.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/sightproc.svg \
-            --plugin qt \
-            --output appimage
+          ./appimagetool-x86_64.AppImage AppDir SightProc-x86_64.AppImage
           test -f SightProc-x86_64.AppImage
           ls -lh SightProc-x86_64.AppImage
 
-      - name: Upload Normal AppImage artifact
+      - name: Upload System-Qt AppImage artifact
         uses: actions/upload-artifact@v7
         with:
           name: sightproc-appimage-normal
@@ -158,11 +145,11 @@ jobs:
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
 
-      - name: Build SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+      - name: Build SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           EXTRA_QT_MODULES: 'svg;waylandcompositor'
-          LDAI_OUTPUT: 'SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage'
+          LDAI_OUTPUT: 'SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage'
           VERSION: ${{ github.ref_name }}
         run: |
           export QMAKE="${{ steps.install-qt.outputs.qt-root-dir }}/bin/qmake"
@@ -188,14 +175,14 @@ jobs:
             --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/sightproc.svg \
             --plugin qt \
             --output appimage
-          test -f SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
-          ls -lh SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+          test -f SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
+          ls -lh SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
 
       - name: Upload Legacy AppImage artifact
         uses: actions/upload-artifact@v7
         with:
           name: sightproc-appimage-legacy
-          path: SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+          path: SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
           if-no-files-found: error
           retention-days: 1
 
@@ -217,7 +204,7 @@ jobs:
       - name: Verify AppImage files
         run: |
           test -f dist/SightProc-x86_64.AppImage
-          test -f dist/SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+          test -f dist/SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
           ls -lh dist/
 
       - name: Publish GitHub Release
@@ -227,4 +214,4 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist/SightProc-x86_64.AppImage
-            dist/SightProc-x86_64-glibc235-legacy-ubuntu22.AppImage
+            dist/SightProc-x86_64-glibc2.35-qt6.9-ubuntu22.04-legacy-nocustomizability.AppImage
