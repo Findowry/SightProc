@@ -4,6 +4,7 @@
 
 #include <QColor>
 #include <QElapsedTimer>
+#include <QPointF>
 #include <QString>
 #include <QVector>
 #include <QWidget>
@@ -76,6 +77,10 @@ public:
     void setMultiSeries(const QVector<MultiSeriesInput>& series);
     void pushMultiSample(const QVector<double>& values);
     void clearMultiSeries();
+    void setInternalLegendVisible(bool visible);
+    void setMultiSeriesFillEnabled(bool enabled);
+    void setHighlightedSeriesIndex(int index);
+    void setMultiSeriesColors(const QVector<QColor>& colors);
 
     void clear();
 
@@ -122,7 +127,8 @@ private:
                     double yMax,
                     const QColor& color,
                     double topAlpha,
-                    Qt::PenStyle penStyle) const;
+                    Qt::PenStyle penStyle,
+                    double strokeWidthOverride = -1.0) const;
     void drawHoverOverlay(QPainter& painter,
                           const QRectF& plotRect,
                           std::size_t count,
@@ -162,6 +168,10 @@ private:
 
     bool m_showHoverValue{true};
     int m_hoverIndex{-1};
+    bool m_internalLegendVisible{true};
+    bool m_multiSeriesFillEnabled{true};
+    int m_highlightedSeriesIndex{-1};
+    QPointF m_hoverPos;
 };
 
 } // namespace sysmon

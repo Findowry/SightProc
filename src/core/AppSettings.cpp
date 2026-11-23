@@ -168,6 +168,15 @@ void AppSettings::load() {
 
     m_selectedThermalSensors = s.value(QStringLiteral("performance/selectedThermals")).toStringList();
 
+    const int cpuViewInt = std::clamp(
+        s.value(QStringLiteral("performance/cpuViewMode"), 0).toInt(), 0, 2);
+    m_cpuViewMode = static_cast<CpuViewMode>(cpuViewInt);
+
+    const QString splitterB64 = s.value(QStringLiteral("performance/splitterState")).toString();
+    if (!splitterB64.isEmpty()) {
+        m_performanceSplitterState = QByteArray::fromBase64(splitterB64.toLatin1());
+    }
+
     if (!QFile::exists(configFilePath()) ||
         !s.contains(QStringLiteral("app/language")) ||
         !s.contains(QStringLiteral("app/refreshMs"))) {
@@ -424,6 +433,26 @@ void AppSettings::setSelectedThermalSensors(const QStringList& ids) {
     m_selectedThermalSensors = ids;
     saveSetting(QStringLiteral("performance/selectedThermals"), ids);
     emit selectedThermalSensorsChanged();
+}
+
+void AppSettings::setCpuViewMode(CpuViewMode mode) {
+    const int clampedInt = std::clamp(static_cast<int>(mode), 0, 2);
+    const auto clamped = static_cast<CpuViewMode>(clampedInt);
+    if (m_cpuViewMode == clamped) {
+        return;
+    }
+    m_cpuViewMode = clamped;
+    saveSetting(QStringLiteral("performance/cpuViewMode"), clampedInt);
+    emit cpuViewModeChanged(m_cpuViewMode);
+}
+
+void AppSettings::setPerformanceSplitterState(const QByteArray& state) {
+    if (state.isEmpty() || m_performanceSplitterState == state) {
+        return;
+    }
+    m_performanceSplitterState = state;
+    saveSetting(QStringLiteral("performance/splitterState"),
+                QString::fromLatin1(state.toBase64()));
 }
 
 QString AppSettings::categoryKey(HardwareCategory cat) {

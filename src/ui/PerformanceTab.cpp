@@ -3,6 +3,7 @@
 #include "core/FormatUtils.h"
 #include "core/Lang.h"
 #include "widgets/AreaChartWidget.h"
+#include "widgets/CombinedCpuWidget.h"
 #include "widgets/CoreGridWidget.h"
 #include "widgets/DeviceListDelegate.h"
 #include "widgets/MemoryBarWidget.h"
@@ -12,6 +13,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFont>
 #include <QFormLayout>
 #include <QFrame>
@@ -94,13 +96,13 @@ void PerformanceTab::setupUi() {
     auto* rootLayout = new QHBoxLayout(this);
     rootLayout->setContentsMargins(8, 8, 8, 8);
 
-    auto* splitter = new QSplitter(Qt::Horizontal, this);
-    splitter->setChildrenCollapsible(false);
+    m_horizontalSplitter = new QSplitter(Qt::Horizontal, this);
+    m_horizontalSplitter->setChildrenCollapsible(false);
 
     // Sol panel: Donanım listesi
     m_deviceModel = new DeviceListModel(this);
     m_deviceDelegate = new DeviceListDelegate(this);
-    m_deviceList = new QListView(splitter);
+    m_deviceList = new QListView(m_horizontalSplitter);
     m_deviceList->setModel(m_deviceModel);
     m_deviceList->setItemDelegate(m_deviceDelegate);
     m_deviceList->setUniformItemSizes(true);
@@ -109,8 +111,8 @@ void PerformanceTab::setupUi() {
     m_deviceList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_deviceList->setMinimumWidth(240);
 
-    // Orta panel: Başlık, + Gösterge Ekle, Çekirdek Izgarası ve Serbest Dikey Splitter Grafikleri
-    auto* centerPanel = new QWidget(splitter);
+    // Orta panel: Başlık, + Gösterge Ekle, CPU Görünüm Modu ve Serbest Dikey Splitter Grafikleri
+    auto* centerPanel = new QWidget(m_horizontalSplitter);
     auto* centerLayout = new QVBoxLayout(centerPanel);
     centerLayout->setContentsMargins(8, 0, 8, 0);
     centerLayout->setSpacing(8);
@@ -127,12 +129,17 @@ void PerformanceTab::setupUi() {
     titleCol->addWidget(m_summaryLabel);
 
     m_addIndicatorBtn = new QPushButton(centerPanel);
-    m_coreGridToggle = new QPushButton(centerPanel);
-    m_coreGridToggle->setCheckable(true);
+    m_cpuViewCombo = new QComboBox(centerPanel);
+    m_cpuViewCombo->addItem(QString(), static_cast<int>(AppSettings::CpuViewMode::Overall));
+    m_cpuViewCombo->addItem(QString(), static_cast<int>(AppSettings::CpuViewMode::LogicalGrid));
+    m_cpuViewCombo->addItem(QString(), static_cast<int>(AppSettings::CpuViewMode::CombinedThreads));
+    const int initModeIdx = m_cpuViewCombo->findData(
+        static_cast<int>(AppSettings::instance().cpuViewMode()));
+    m_cpuViewCombo->setCurrentIndex(initModeIdx >= 0 ? initModeIdx : 0);
 
     headerRow->addLayout(titleCol, 1);
     headerRow->addWidget(m_addIndicatorBtn, 0, Qt::AlignTop);
-    headerRow->addWidget(m_coreGridToggle, 0, Qt::AlignTop);
+    headerRow->addWidget(m_cpuViewCombo, 0, Qt::AlignTop);
     centerLayout->addLayout(headerRow);
 
     m_centerStack = new QStackedWidget(centerPanel);
@@ -175,13 +182,15 @@ void PerformanceTab::setupUi() {
     chartPageLayout->addWidget(m_memoryBar);
 
     m_coreGrid = new CoreGridWidget(m_centerStack);
+    m_combinedCpu = new CombinedCpuWidget(m_centerStack);
 
     m_centerStack->addWidget(chartPage);
     m_centerStack->addWidget(m_coreGrid);
+    m_centerStack->addWidget(m_combinedCpu);
     centerLayout->addWidget(m_centerStack, 1);
 
     // Sağ panel: Teknik Künye ve Özelleştir
-    auto* rightPanel = new QWidget(splitter);
+    auto* rightPanel = new QWidget(m_horizontalSplitter);
     auto* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(4, 0, 4, 0);
     rightLayout->setSpacing(6);
@@ -210,26 +219,48 @@ void PerformanceTab::setupUi() {
     m_probeGpuCheck->setVisible(false);
     rightLayout->addWidget(m_probeGpuCheck);
 
-    splitter->addWidget(m_deviceList);
-    splitter->addWidget(centerPanel);
-    splitter->addWidget(rightPanel);
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 3);
-    splitter->setStretchFactor(2, 1);
-    splitter->setSizes({260, 720, 320});
+    m_horizontalSplitter->addWidget(m_deviceList);
+    m_horizontalSplitter->addWidget(centerPanel);
+    m_horizontalSplitter->addWidget(rightPanel);
+    m_horizontalSplitter->setStretchFactor(0, 1);
+    m_horizontalSplitter->setStretchFactor(1, 3);
+    m_horizontalSplitter->setStretchFactor(2, 1);
+    m_horizontalSplitter->setSizes({260, 720, 320});
 
-    rootLayout->addWidget(splitter);
+    const QByteArray savedSplitter = AppSettings::instance().performanceSplitterState();
+    if (!savedSplitter.isEmpty()) {
+        if (!m_horizontalSplitter->restoreState(savedSplitter)) {
+            m_horizontalSplitter->setSizes({260, 720, 320});
+        }
+    }
+
+    rootLayout->addWidget(m_horizontalSplitter);
 
     auto* zoomFilter = new ZoomWheelFilter(0, this);
     installEventFilter(zoomFilter);
     m_deviceList->viewport()->installEventFilter(zoomFilter);
     m_mainChart->installEventFilter(zoomFilter);
+    m_combinedCpu->installZoomFilter(zoomFilter);
     m_specsScroll->viewport()->installEventFilter(zoomFilter);
 
     connect(m_deviceList->selectionModel(), &QItemSelectionModel::currentChanged,
             this, &PerformanceTab::onDeviceSelectionChanged);
-    connect(m_coreGridToggle, &QPushButton::toggled,
-            this, &PerformanceTab::onCoreGridToggled);
+    connect(m_cpuViewCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, &PerformanceTab::onCpuViewModeChanged);
+    connect(&AppSettings::instance(), &AppSettings::cpuViewModeChanged,
+            this, [this](AppSettings::CpuViewMode mode) {
+                const int modeInt = static_cast<int>(mode);
+                {
+                    const QSignalBlocker blocker(m_cpuViewCombo);
+                    const int idx = m_cpuViewCombo->findData(modeInt);
+                    if (idx >= 0) {
+                        m_cpuViewCombo->setCurrentIndex(idx);
+                    }
+                }
+                if (m_hasSnapshot) {
+                    refreshCenterAndSpecs();
+                }
+            });
     connect(m_addIndicatorBtn, &QPushButton::clicked,
             this, &PerformanceTab::onAddIndicatorClicked);
     connect(m_customizeSpecsBtn, &QPushButton::clicked,
@@ -240,6 +271,12 @@ void PerformanceTab::setupUi() {
         AppSettings::instance().setProbeSleepingGpus(on);
         emit probeSleepingGpusToggled(on);
     });
+}
+
+void PerformanceTab::saveLayoutState() {
+    if (m_horizontalSplitter) {
+        AppSettings::instance().setPerformanceSplitterState(m_horizontalSplitter->saveState());
+    }
 }
 
 void PerformanceTab::applyAppearance() {
@@ -270,6 +307,7 @@ void PerformanceTab::applyAppearance() {
 
     m_probeGpuCheck->setChecked(s.probeSleepingGpus());
     m_coreGrid->applyVisualSettings();
+    m_combinedCpu->applyVisualSettings();
     m_memoryBar->update();
 
     if (m_hasSnapshot) {
@@ -284,7 +322,17 @@ void PerformanceTab::applyAppearance() {
 }
 
 void PerformanceTab::retranslateUi() {
-    m_coreGridToggle->setText(trText("Logical Cores (Grid)", "Mantıksal Çekirdekler (Izgara)"));
+    {
+        const QSignalBlocker blocker(m_cpuViewCombo);
+        if (m_cpuViewCombo->count() >= 3) {
+            m_cpuViewCombo->setItemText(0, trText("Overall", "Toplam"));
+            m_cpuViewCombo->setItemText(1, trText("Logical Cores (Grid)", "Mantıksal Çekirdekler (Izgara)"));
+            m_cpuViewCombo->setItemText(2, trText("Combined (All Threads)", "Birleşik (Tüm İzlekler)"));
+        }
+    }
+    m_cpuViewCombo->setToolTip(trText("CPU graph view mode", "CPU grafik görünüm modu"));
+    m_combinedCpu->retranslateUi();
+
     m_specHeaderLabel->setText(trText("Technical Specs", "Teknik Künye"));
     m_customizeSpecsBtn->setText(trText("Customize...", "Özelleştir..."));
     m_probeGpuCheck->setText(trText("Probe sleeping NVIDIA GPU (D3cold)",
@@ -319,6 +367,7 @@ void PerformanceTab::onTelemetrySnapshot(const SystemTelemetrySnapshot& snapshot
 
     m_deviceModel->updateFromSnapshot(snapshot);
     m_coreGrid->updateCores(snapshot.cpu.cores);
+    m_combinedCpu->updateCores(snapshot.cpu.cores);
 
     int targetRow = m_deviceModel->rowForKey(m_selectedKey);
     if (targetRow < 0 && m_deviceModel->rowCount() > 0) {
@@ -352,10 +401,15 @@ void PerformanceTab::onDeviceSelectionChanged(const QModelIndex& current,
     }
 }
 
-void PerformanceTab::onCoreGridToggled(bool checked) {
+void PerformanceTab::onCpuViewModeChanged(int comboIndex) {
+    if (comboIndex < 0 || !m_cpuViewCombo) {
+        return;
+    }
+    const int modeInt = std::clamp(m_cpuViewCombo->itemData(comboIndex).toInt(), 0, 2);
+    AppSettings::instance().setCpuViewMode(static_cast<AppSettings::CpuViewMode>(modeInt));
     if (const DeviceEntry* entry = m_deviceModel->entryAt(m_deviceList->currentIndex().row())) {
         if (entry->kind == DeviceKind::Cpu) {
-            m_centerStack->setCurrentIndex(checked ? 1 : 0);
+            m_centerStack->setCurrentIndex(modeInt);
         }
     }
 }
@@ -838,8 +892,13 @@ void PerformanceTab::refreshCenterAndSpecs() {
 
     const bool isCpu = (entry->kind == DeviceKind::Cpu);
     const bool isThermal = (entry->kind == DeviceKind::ThermalOverview);
-    m_coreGridToggle->setVisible(isCpu);
-    m_centerStack->setCurrentIndex((isCpu && m_coreGridToggle->isChecked()) ? 1 : 0);
+    m_cpuViewCombo->setVisible(isCpu);
+    if (isCpu) {
+        const int modeIdx = std::clamp(static_cast<int>(AppSettings::instance().cpuViewMode()), 0, 2);
+        m_centerStack->setCurrentIndex(modeIdx);
+    } else {
+        m_centerStack->setCurrentIndex(0);
+    }
 
     if (isThermal) {
         m_addIndicatorBtn->setText(trText("+ Select Sensors", "+ Sensör Seç"));

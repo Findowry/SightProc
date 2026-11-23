@@ -119,7 +119,7 @@ jobs:
           arch: 'linux_gcc_64'
           cache: true
 
-      - name: Apply CI-only Qt 6.9 compatibility patch
+      - name: Apply CI-only Qt 6.9 and legacy About patches
         run: |
           sed -i \
             -e '/beginFilterChange();/d' \
@@ -129,6 +129,13 @@ jobs:
           ! grep -nE 'beginFilterChange|endFilterChange' \
             src/models/ProcessFilterProxyModel.cpp \
             src/models/ServiceTableModel.cpp
+
+          sed -i \
+            -e 's|<h3>SightProc \([0-9][0-9.]*\)</h3>|<h3>SightProc \1 (Legacy)</h3>|' \
+            -e 's|<p>Your sight into /proc\.</p>|<p>You are using a legacy version of SightProc that doesn'\''t offer proper customization. This version is patched for Qt 6.9 compatibility. This version offers glibc 2.35+ support.</p><p>Your sight into /proc.</p>|' \
+            src/ui/MainWindow.cpp
+          grep -q '<h3>SightProc [0-9][0-9.]* (Legacy)</h3>' src/ui/MainWindow.cpp
+          grep -q "You are using a legacy version of SightProc that doesn't offer proper customization\. This version is patched for Qt 6\.9 compatibility\. This version offers glibc 2\.35+ support\." src/ui/MainWindow.cpp
           git diff --stat
 
       - name: Configure and build SightProc

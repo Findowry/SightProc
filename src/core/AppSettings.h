@@ -2,6 +2,7 @@
 
 #include "core/Lang.h"
 
+#include <QByteArray>
 #include <QColor>
 #include <QObject>
 #include <QStringList>
@@ -29,6 +30,12 @@ public:
         Neon,
         Pastel,
         SystemPalette
+    };
+
+    enum class CpuViewMode {
+        Overall = 0,
+        LogicalGrid = 1,
+        CombinedThreads = 2
     };
 
     static AppSettings& instance();
@@ -89,6 +96,12 @@ public:
     [[nodiscard]] QStringList selectedThermalSensors() const noexcept { return m_selectedThermalSensors; }
     void setSelectedThermalSensors(const QStringList& ids);
 
+    [[nodiscard]] CpuViewMode cpuViewMode() const noexcept { return m_cpuViewMode; }
+    void setCpuViewMode(CpuViewMode mode);
+
+    [[nodiscard]] QByteArray performanceSplitterState() const noexcept { return m_performanceSplitterState; }
+    void setPerformanceSplitterState(const QByteArray& state);
+
     [[nodiscard]] static QString configDirPath();
     [[nodiscard]] static QString configFilePath();
 
@@ -105,6 +118,7 @@ signals:
     void performanceExtrasChanged();
     void selectedThermalSensorsChanged();
     void processPrefsChanged();
+    void cpuViewModeChanged(sysmon::AppSettings::CpuViewMode mode);
 
 private:
     explicit AppSettings(QObject* parent = nullptr);
@@ -132,6 +146,8 @@ private:
     QStringList m_indicators[static_cast<int>(HardwareCategory::Count)];
     QStringList m_extraSpecs[static_cast<int>(HardwareCategory::Count)];
     QStringList m_selectedThermalSensors;
+    CpuViewMode m_cpuViewMode{CpuViewMode::Overall};
+    QByteArray m_performanceSplitterState;
 };
 
 } // namespace sysmon

@@ -1,9 +1,9 @@
 # Maintainer: SightProc Contributors
 # SightProc Arch Linux PKGBUILD
-# After tagging v1.0.0 on GitHub, update sha256sums with `updpkgsums`.
+# After tagging v1.1.0 on GitHub, update sha256sums with `updpkgsums`.
 
 pkgname=sightproc
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc='Qt6 Widgets C++20 based GNU/Linux system monitor'
 arch=('x86_64' 'aarch64')

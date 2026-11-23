@@ -11,6 +11,7 @@
 #include <QWidget>
 
 class QCheckBox;
+class QComboBox;
 class QFormLayout;
 class QLabel;
 class QListView;
@@ -25,6 +26,7 @@ class QTableWidgetItem;
 namespace sysmon {
 
 class AreaChartWidget;
+class CombinedCpuWidget;
 class CoreGridWidget;
 class DeviceListDelegate;
 class MemoryBarWidget;
@@ -38,6 +40,7 @@ class PerformanceTab : public QWidget {
 
 public:
     explicit PerformanceTab(QWidget* parent = nullptr);
+    void saveLayoutState();
 
 public slots:
     void onTelemetrySnapshot(const sysmon::SystemTelemetrySnapshot& snapshot);
@@ -49,7 +52,7 @@ signals:
 
 private slots:
     void onDeviceSelectionChanged(const QModelIndex& current, const QModelIndex& previous);
-    void onCoreGridToggled(bool checked);
+    void onCpuViewModeChanged(int comboIndex);
     void onAddIndicatorClicked();
     void onCustomizeSpecsClicked();
     void onThermalItemChanged(QTableWidgetItem* item);
@@ -77,10 +80,12 @@ private:
     DeviceListDelegate* m_deviceDelegate{nullptr};
     QListView* m_deviceList{nullptr};
 
+    QSplitter* m_horizontalSplitter{nullptr};
+
     QLabel* m_titleLabel{nullptr};
     QLabel* m_summaryLabel{nullptr};
     QPushButton* m_addIndicatorBtn{nullptr};
-    QPushButton* m_coreGridToggle{nullptr};
+    QComboBox* m_cpuViewCombo{nullptr};
     QStackedWidget* m_centerStack{nullptr};
 
     QSplitter* m_verticalSplitter{nullptr};
@@ -94,6 +99,7 @@ private:
 
     QTableWidget* m_thermalTable{nullptr};
     CoreGridWidget* m_coreGrid{nullptr};
+    CombinedCpuWidget* m_combinedCpu{nullptr};
 
     QLabel* m_specHeaderLabel{nullptr};
     QPushButton* m_customizeSpecsBtn{nullptr};

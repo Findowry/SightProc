@@ -438,7 +438,8 @@ void MainWindow::showAboutDialog() {
     const QString desc = trText("Qt6 Widgets C++20 based GNU/Linux system monitor",
                                 "Qt6 Widgets C++20 tabanlı GNU/Linux sistem monitörü");
     box.setText(
-        QStringLiteral("<h3>SightProc 1.0.0</h3>"
+        QStringLiteral("<h3>SightProc 1.1.0</h3>"
+                       "<p>Your sight into /proc.</p>"
                        "<p>%1</p>"
                        "<p><a href=\"https://github.com/Findowry/SightProc\">"
                        "https://github.com/Findowry/SightProc</a></p>")
@@ -512,6 +513,9 @@ void MainWindow::changeEvent(QEvent* event) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    if (m_performanceTab) {
+        m_performanceTab->saveLayoutState();
+    }
     shutdownWorkers();
     QMainWindow::closeEvent(event);
 }

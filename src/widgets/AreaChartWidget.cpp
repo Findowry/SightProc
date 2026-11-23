@@ -304,6 +304,7 @@ void AreaChartWidget::setHistory(const std::vector<double>& primary,
     m_primary.clear();
     m_secondary.clear();
     m_hoverIndex = -1;
+    m_highlightedSeriesIndex = -1;
     m_scrollLag = 0.0;
     m_frameClock.invalidate();
     m_lastSampleClock.invalidate();
@@ -335,6 +336,9 @@ void AreaChartWidget::setMultiSeries(const QVector<MultiSeriesInput>& series) {
         m_multiSeries.push_back(std::move(item));
     }
     m_hoverIndex = -1;
+    if (m_highlightedSeriesIndex >= static_cast<int>(m_multiSeries.size())) {
+        m_highlightedSeriesIndex = -1;
+    }
     m_scrollLag = 0.0;
     m_frameClock.invalidate();
     m_lastSampleClock.invalidate();
@@ -356,7 +360,48 @@ void AreaChartWidget::pushMultiSample(const QVector<double>& values) {
 void AreaChartWidget::clearMultiSeries() {
     m_multiSeries.clear();
     m_hoverIndex = -1;
+    m_highlightedSeriesIndex = -1;
     update();
+}
+
+void AreaChartWidget::setInternalLegendVisible(bool visible) {
+    if (m_internalLegendVisible == visible) {
+        return;
+    }
+    m_internalLegendVisible = visible;
+    updateGeometry();
+    update();
+}
+
+void AreaChartWidget::setMultiSeriesFillEnabled(bool enabled) {
+    if (m_multiSeriesFillEnabled == enabled) {
+        return;
+    }
+    m_multiSeriesFillEnabled = enabled;
+    update();
+}
+
+void AreaChartWidget::setHighlightedSeriesIndex(int index) {
+    if (m_highlightedSeriesIndex == index) {
+        return;
+    }
+    m_highlightedSeriesIndex = index;
+    update();
+}
+
+void AreaChartWidget::setMultiSeriesColors(const QVector<QColor>& colors) {
+    const std::size_t n = std::min(m_multiSeries.size(), static_cast<std::size_t>(colors.size()));
+    bool changed = false;
+    for (std::size_t i = 0; i < n; ++i) {
+        const QColor& c = colors[static_cast<qsizetype>(i)];
+        if (m_multiSeries[i].color != c) {
+            m_multiSeries[i].color = c;
+            changed = true;
+        }
+    }
+    if (changed) {
+        update();
+    }
 }
 
 void AreaChartWidget::clear() {
@@ -364,6 +409,7 @@ void AreaChartWidget::clear() {
     m_secondary.clear();
     m_multiSeries.clear();
     m_hoverIndex = -1;
+    m_highlightedSeriesIndex = -1;
     m_scrollLag = 0.0;
     m_frameClock.invalidate();
     m_lastSampleClock.invalidate();
@@ -402,7 +448,9 @@ void AreaChartWidget::paintEvent(QPaintEvent*) {
 
     if (m_displayMode == DisplayMode::Detailed) {
         drawGridAndAxes(painter, plotRect, yMin, yMax);
-        drawLegend(painter, plotRect, count);
+        if (m_internalLegendVisible) {
+            drawLegend(painter, plotRect, count);
+        }
     }
 
     if (count > 0) {
@@ -410,19 +458,79 @@ void AreaChartWidget::paintEvent(QPaintEvent*) {
         painter.setClipRect(plotRect.adjusted(-1.0, -2.0, 1.0, 2.0));
 
         if (!m_multiSeries.empty()) {
-            const double fillAlpha = std::clamp(m_fillTopAlpha * 0.45, 0.04, 0.35);
-            for (const auto& s : m_multiSeries) {
+            const bool hasHighlight =
+                (m_highlightedSeriesIndex >= 0 &&
+                 static_cast<std::size_t>(m_highlightedSeriesIndex) < m_multiSeries.size());
+
+            for (std::size_t i = 0; i < m_multiSeries.size(); ++i) {
+                if (hasHighlight && static_cast<int>(i) == m_highlightedSeriesIndex) {
+                    continue;
+                }
+                const auto& s = m_multiSeries[i];
                 const std::size_t sc = std::min(s.buffer.size(), count);
-                if (sc > 0) {
+                if (sc == 0) {
+                    continue;
+                }
+                QColor col = s.color.isValid() ? s.color : primarySeriesColor();
+                if (hasHighlight) {
+                    col.setAlphaF(0.18f);
                     drawSeries(painter,
                                plotRect,
                                s.buffer,
                                sc,
                                yMin,
                                yMax,
-                               s.color.isValid() ? s.color : primarySeriesColor(),
+                               col,
+                               0.0,
+                               Qt::SolidLine,
+                               std::max(1.0, m_lineWidth * 0.8));
+                } else if (!m_multiSeriesFillEnabled) {
+                    col.setAlphaF(0.90f);
+                    const double lw = (m_multiSeries.size() >= 12)
+                        ? std::min(m_lineWidth, 1.65)
+                        : m_lineWidth;
+                    drawSeries(painter,
+                               plotRect,
+                               s.buffer,
+                               sc,
+                               yMin,
+                               yMax,
+                               col,
+                               0.0,
+                               Qt::SolidLine,
+                               lw);
+                } else {
+                    const double fillAlpha = std::clamp(m_fillTopAlpha * 0.45, 0.04, 0.35);
+                    drawSeries(painter,
+                               plotRect,
+                               s.buffer,
+                               sc,
+                               yMin,
+                               yMax,
+                               col,
                                fillAlpha,
                                Qt::SolidLine);
+                }
+            }
+
+            if (hasHighlight) {
+                const auto& hs = m_multiSeries[static_cast<std::size_t>(m_highlightedSeriesIndex)];
+                const std::size_t sc = std::min(hs.buffer.size(), count);
+                if (sc > 0) {
+                    QColor col = hs.color.isValid() ? hs.color : primarySeriesColor();
+                    col.setAlphaF(1.0f);
+                    const double highlightFill = std::clamp(m_fillTopAlpha * 0.55, 0.10, 0.32);
+                    const double highlightWidth = std::min(4.0, m_lineWidth + 1.1);
+                    drawSeries(painter,
+                               plotRect,
+                               hs.buffer,
+                               sc,
+                               yMin,
+                               yMax,
+                               col,
+                               highlightFill,
+                               Qt::SolidLine,
+                               highlightWidth);
                 }
             }
         } else {
@@ -620,6 +728,12 @@ QRectF AreaChartWidget::computePlotRect(double yMax) const {
     const double lineH = static_cast<double>(fm.height()) + 4.0;
     const double yLabelWidth = static_cast<double>(fm.horizontalAdvance(formatValue(yMax))) + 14.0;
     const double leftMargin = std::max(54.0, yLabelWidth);
+    if (!m_internalLegendVisible) {
+        return QRectF(leftMargin,
+                      10.0,
+                      std::max(0.0, static_cast<double>(width()) - leftMargin - 12.0),
+                      std::max(0.0, static_cast<double>(height()) - 22.0));
+    }
     const QRectF rough(leftMargin,
                        lineH,
                        std::max(0.0, static_cast<double>(width()) - leftMargin - 12.0),
@@ -781,7 +895,8 @@ void AreaChartWidget::drawSeries(QPainter& painter,
                                  double yMax,
                                  const QColor& color,
                                  double topAlpha,
-                                 Qt::PenStyle penStyle) const {
+                                 Qt::PenStyle penStyle,
+                                 double strokeWidthOverride) const {
     const std::size_t offset = buffer.size() - count;
     const double spanY = std::max(yMax - yMin, kMinSpan);
     const double stepX = (m_maxSamples > 1)
@@ -810,27 +925,30 @@ void AreaChartWidget::drawSeries(QPainter& painter,
 
     const QPainterPath strokePath = buildSmoothCurvePath(points);
 
-    QPainterPath fillPath = strokePath;
-    fillPath.lineTo(points.back().x(), plotRect.bottom());
-    fillPath.lineTo(points.front().x(), plotRect.bottom());
-    fillPath.closeSubpath();
+    if (topAlpha > 0.001) {
+        QPainterPath fillPath = strokePath;
+        fillPath.lineTo(points.back().x(), plotRect.bottom());
+        fillPath.lineTo(points.front().x(), plotRect.bottom());
+        fillPath.closeSubpath();
 
-    QColor topColor = color;
-    topColor.setAlphaF(static_cast<float>(topAlpha));
-    QColor bottomColor = color;
-    bottomColor.setAlphaF(0.02f);
+        QColor topColor = color;
+        topColor.setAlphaF(static_cast<float>(topAlpha));
+        QColor bottomColor = color;
+        bottomColor.setAlphaF(0.02f);
 
-    QLinearGradient gradient(0.0, plotRect.top(), 0.0, plotRect.bottom());
-    gradient.setColorAt(0.0, topColor);
-    gradient.setColorAt(1.0, bottomColor);
+        QLinearGradient gradient(0.0, plotRect.top(), 0.0, plotRect.bottom());
+        gradient.setColorAt(0.0, topColor);
+        gradient.setColorAt(1.0, bottomColor);
 
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(gradient);
-    painter.drawPath(fillPath);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(gradient);
+        painter.drawPath(fillPath);
+    }
 
+    const double baseWidth = (strokeWidthOverride > 0.0) ? strokeWidthOverride : m_lineWidth;
     const double penWidth = (m_displayMode == DisplayMode::Sparkline)
-        ? std::max(1.2, m_lineWidth * 0.75)
-        : m_lineWidth;
+        ? std::max(1.2, baseWidth * 0.75)
+        : baseWidth;
     QPen strokePen(color, penWidth, penStyle, Qt::RoundCap, Qt::RoundJoin);
     painter.setPen(strokePen);
     painter.setBrush(Qt::NoBrush);
@@ -887,14 +1005,90 @@ void AreaChartWidget::drawHoverOverlay(QPainter& painter,
     };
 
     if (!m_multiSeries.empty()) {
-        for (const auto& s : m_multiSeries) {
+        const bool hasHighlight =
+            (m_highlightedSeriesIndex >= 0 &&
+             static_cast<std::size_t>(m_highlightedSeriesIndex) < m_multiSeries.size());
+        if (hasHighlight) {
+            const auto& s = m_multiSeries[static_cast<std::size_t>(m_highlightedSeriesIndex)];
             const std::size_t sc = std::min(s.buffer.size(), count);
-            if (idx >= sc) {
-                continue;
+            if (idx < sc) {
+                const std::size_t off = s.buffer.size() - sc;
+                const QColor col = s.color.isValid() ? s.color : primarySeriesColor();
+                addPoint(s.buffer[off + idx], col, s.label);
             }
-            const std::size_t off = s.buffer.size() - sc;
-            const QColor col = s.color.isValid() ? s.color : primarySeriesColor();
-            addPoint(s.buffer[off + idx], col, s.label);
+        } else if (m_multiSeries.size() <= 8) {
+            for (const auto& s : m_multiSeries) {
+                const std::size_t sc = std::min(s.buffer.size(), count);
+                if (idx >= sc) {
+                    continue;
+                }
+                const std::size_t off = s.buffer.size() - sc;
+                const QColor col = s.color.isValid() ? s.color : primarySeriesColor();
+                addPoint(s.buffer[off + idx], col, s.label);
+            }
+        } else {
+            struct Candidate {
+                std::size_t seriesIdx;
+                double rawVal;
+                double pixelY;
+            };
+            std::vector<Candidate> candidates;
+            candidates.reserve(m_multiSeries.size());
+            std::size_t closestIdx = 0;
+            double minCursorDist = 1e9;
+
+            for (std::size_t i = 0; i < m_multiSeries.size(); ++i) {
+                const auto& s = m_multiSeries[i];
+                const std::size_t sc = std::min(s.buffer.size(), count);
+                if (idx >= sc) {
+                    continue;
+                }
+                const std::size_t off = s.buffer.size() - sc;
+                const double rawVal = s.buffer[off + idx];
+                const double clamped = std::clamp(rawVal, yMin, yMax);
+                const double pixelY = plotRect.bottom() - ((clamped - yMin) / spanY) * plotRect.height();
+                const double dist = std::fabs(pixelY - m_hoverPos.y());
+                if (candidates.empty() || dist < minCursorDist) {
+                    minCursorDist = dist;
+                    closestIdx = i;
+                }
+                candidates.push_back(Candidate{i, rawVal, pixelY});
+            }
+
+            std::sort(candidates.begin(), candidates.end(),
+                      [](const Candidate& a, const Candidate& b) {
+                          if (a.rawVal != b.rawVal) {
+                              return a.rawVal > b.rawVal;
+                          }
+                          return a.seriesIdx < b.seriesIdx;
+                      });
+
+            std::vector<Candidate> selected;
+            selected.reserve(6);
+            bool closestIncluded = false;
+            for (const auto& c : candidates) {
+                if (selected.size() >= 5) {
+                    break;
+                }
+                selected.push_back(c);
+                if (c.seriesIdx == closestIdx) {
+                    closestIncluded = true;
+                }
+            }
+            if (!closestIncluded) {
+                for (const auto& c : candidates) {
+                    if (c.seriesIdx == closestIdx) {
+                        selected.push_back(c);
+                        break;
+                    }
+                }
+            }
+
+            for (const auto& c : selected) {
+                const auto& s = m_multiSeries[c.seriesIdx];
+                const QColor col = s.color.isValid() ? s.color : primarySeriesColor();
+                addPoint(c.rawVal, col, s.label);
+            }
         }
     } else {
         const std::size_t offset = m_primary.size() - count;
@@ -969,6 +1163,8 @@ void AreaChartWidget::updateHoverFromPos(const QPointF& pos) {
         return;
     }
 
+    m_hoverPos = pos;
+
     const double stepX = (m_maxSamples > 1)
         ? (plotRect.width() / static_cast<double>(m_maxSamples - 1))
         : plotRect.width();
@@ -978,7 +1174,8 @@ void AreaChartWidget::updateHoverFromPos(const QPointF& pos) {
     const int newIndex = static_cast<int>(count) - 1 - stepsFromEnd;
 
     if (newIndex >= 0 && newIndex < static_cast<int>(count)) {
-        if (m_hoverIndex != newIndex) {
+        if (m_hoverIndex != newIndex ||
+            (m_showHoverValue && m_multiSeries.size() > 8 && m_highlightedSeriesIndex < 0)) {
             m_hoverIndex = newIndex;
             update();
         }

@@ -10,3 +10,4 @@ Icon=sightproc
 Terminal=false
 Categories=System;Monitor;Qt;
 StartupNotify=true
+StartupWMClass=sightproc

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(SightProc VERSION 1.0.0 LANGUAGES CXX)
+project(SightProc VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -65,6 +65,8 @@ add_executable(sightproc
     src/widgets/ThemeUtils.cpp
     src/widgets/AreaChartWidget.h
     src/widgets/AreaChartWidget.cpp
+    src/widgets/CombinedCpuWidget.h
+    src/widgets/CombinedCpuWidget.cpp
     src/widgets/DeviceListDelegate.h
     src/widgets/DeviceListDelegate.cpp
     src/widgets/CoreGridWidget.h
