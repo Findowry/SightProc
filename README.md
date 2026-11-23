@@ -1,5 +1,7 @@
 # SightProc
 
+**`Your sight into /proc.`**
+
 A native GNU/Linux system monitor and process manager built with C++20 and Qt6 Widgets.
 
 ## Screenshots
