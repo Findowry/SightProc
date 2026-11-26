@@ -413,13 +413,28 @@ ProcessSnapshot ProcessCollector::collect(double elapsedSec, bool probeSleepingG
             proc.ioReadable = true;
             std::uint64_t rBytes = 0;
             std::uint64_t wBytes = 0;
+            auto parseIoCounter = [](std::string_view line,
+                                     std::string_view prefix,
+                                     std::uint64_t& outVal) -> bool {
+                if (!line.starts_with(prefix)) {
+                    return false;
+                }
+                std::string_view rest = line.substr(prefix.size());
+                while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) {
+                    rest.remove_prefix(1);
+                }
+                if (rest.empty()) {
+                    return false;
+                }
+                const auto [ptr, ec] = std::from_chars(rest.data(), rest.data() + rest.size(), outVal);
+                (void)ptr;
+                return ec == std::errc{};
+            };
             std::istringstream iss(fileContent);
             std::string ioLine;
             while (std::getline(iss, ioLine)) {
-                if (ioLine.starts_with("read_bytes:")) {
-                    std::from_chars(ioLine.data() + 12, ioLine.data() + ioLine.size(), rBytes);
-                } else if (ioLine.starts_with("write_bytes:")) {
-                    std::from_chars(ioLine.data() + 13, ioLine.data() + ioLine.size(), wBytes);
+                if (!parseIoCounter(ioLine, "read_bytes:", rBytes)) {
+                    (void)parseIoCounter(ioLine, "write_bytes:", wBytes);
                 }
             }
             nextIoBytes.emplace(key, PrevIo{rBytes, wBytes});
@@ -763,6 +778,7 @@ QVector<ApplicationInfo> ProcessCollector::buildApplications(
 
         ApplicationInfo& target = apps[outIdx];
         target.pids.push_back(p.pid);
+        target.instances.push_back(ProcessInstanceRef{p.pid, p.startTimeTicks});
         target.cpuPercent += p.cpuPercent;
         target.rssBytes += p.rssBytes;
         target.sharedBytes += p.sharedBytes;

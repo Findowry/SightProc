@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/NvmlBridge.h"
 #include "core/TelemetryTypes.h"
 
 #include <QMainWindow>
@@ -92,6 +93,7 @@ private:
     QAction* m_shortcutsAct{nullptr};
     QAction* m_aboutAct{nullptr};
 
+    NvmlBridge m_nvml;
     QThread m_telemetryThread;
     TelemetryWorker* m_telemetryWorker{nullptr};
     QThread m_processThread;

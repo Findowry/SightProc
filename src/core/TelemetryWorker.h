@@ -25,7 +25,7 @@ class TelemetryWorker : public QObject {
     Q_OBJECT
 
 public:
-    explicit TelemetryWorker(QObject* parent = nullptr);
+    explicit TelemetryWorker(NvmlBridge& nvml, QObject* parent = nullptr);
     ~TelemetryWorker() override;
 
     void setQtPlatformName(const QString& platformName);
@@ -46,7 +46,6 @@ private slots:
 private:
     void collectAndEmit();
 
-    NvmlBridge m_nvml;
     HwmonCollector m_hwmonCollector;
     CpuCollector m_cpuCollector;
     MemoryCollector m_memoryCollector;

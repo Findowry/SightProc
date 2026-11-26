@@ -80,14 +80,19 @@ bool hasAwakeNvidiaCard(bool probeSleepingGpus) {
         return false;
     }
     bool foundNvidia = false;
-    for (const auto& entry : std::filesystem::directory_iterator(drmRoot, ec)) {
+    std::error_code iterEc;
+    std::filesystem::directory_iterator it(drmRoot, iterEc);
+    const std::filesystem::directory_iterator end;
+    for (; !iterEc && it != end; it.increment(iterEc)) {
+        const auto& entry = *it;
         const std::string name = entry.path().filename().string();
         if (!name.starts_with("card") || name.find('-') != std::string::npos) {
             continue;
         }
+        std::error_code entryEc;
         const std::filesystem::path drvLink =
-            std::filesystem::read_symlink(entry.path() / "device/driver", ec);
-        if (ec || drvLink.filename().string() != "nvidia") {
+            std::filesystem::read_symlink(entry.path() / "device/driver", entryEc);
+        if (entryEc || drvLink.filename().string() != "nvidia") {
             continue;
         }
         foundNvidia = true;
@@ -109,6 +114,16 @@ NvmlBridge::~NvmlBridge() {
 }
 
 bool NvmlBridge::ensureInitialized() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return ensureInitializedLocked();
+}
+
+bool NvmlBridge::isAvailable() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_initialized;
+}
+
+bool NvmlBridge::ensureInitializedLocked() {
     if (m_initialized) {
         return true;
     }
@@ -161,7 +176,7 @@ bool NvmlBridge::ensureInitialized() {
     loadSymbol(m_handle, "nvmlDeviceGetProcessUtilization", m_getProcessUtilization);
 
     if (!hasInit || m_init() != kNvmlSuccess) {
-        shutdown();
+        shutdownLocked();
         m_attemptedInit = true;
         return false;
     }
@@ -171,7 +186,8 @@ bool NvmlBridge::ensureInitialized() {
 }
 
 bool NvmlBridge::queryDeviceByPciBusId(const QString& pciSlot, NvmlDeviceStats& out) {
-    if (!ensureInitialized()) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!ensureInitializedLocked()) {
         return false;
     }
 
@@ -292,7 +308,8 @@ NvmlBridge::queryAllProcessMetrics(bool probeSleepingGpus) {
     if (!hasAwakeNvidiaCard(probeSleepingGpus)) {
         return out;
     }
-    if (!ensureInitialized() || !m_getCount || !m_getHandleByIndex) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!ensureInitializedLocked() || !m_getCount || !m_getHandleByIndex) {
         return out;
     }
 
@@ -360,6 +377,11 @@ NvmlBridge::queryAllProcessMetrics(bool probeSleepingGpus) {
 }
 
 void NvmlBridge::shutdown() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    shutdownLocked();
+}
+
+void NvmlBridge::shutdownLocked() {
     if (m_initialized && m_shutdown) {
         m_shutdown();
     }

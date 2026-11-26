@@ -66,9 +66,15 @@ HwmonReadings HwmonCollector::collect() {
     }
 
     std::vector<std::filesystem::path> hwmonDirs;
-    for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
-        if (entry.exists(ec)) {
-            hwmonDirs.push_back(entry.path());
+    {
+        std::error_code iterEc;
+        for (std::filesystem::directory_iterator it(root, iterEc), end;
+             !iterEc && it != end;
+             it.increment(iterEc)) {
+            std::error_code entryEc;
+            if (it->exists(entryEc) && !entryEc) {
+                hwmonDirs.push_back(it->path());
+            }
         }
     }
     std::sort(hwmonDirs.begin(), hwmonDirs.end());
@@ -95,13 +101,18 @@ HwmonReadings HwmonCollector::collect() {
         std::map<int, std::filesystem::path> tempInputs;
         std::map<int, std::filesystem::path> fanInputs;
 
-        for (const auto& fileEntry : std::filesystem::directory_iterator(dir, ec)) {
-            const std::string fname = fileEntry.path().filename().string();
-            int idx = 0;
-            if (extractSensorIndex(fname, "temp", "_input", idx)) {
-                tempInputs[idx] = fileEntry.path();
-            } else if (extractSensorIndex(fname, "fan", "_input", idx)) {
-                fanInputs[idx] = fileEntry.path();
+        {
+            std::error_code iterEc;
+            for (std::filesystem::directory_iterator it(dir, iterEc), end;
+                 !iterEc && it != end;
+                 it.increment(iterEc)) {
+                const std::string fname = it->path().filename().string();
+                int idx = 0;
+                if (extractSensorIndex(fname, "temp", "_input", idx)) {
+                    tempInputs[idx] = it->path();
+                } else if (extractSensorIndex(fname, "fan", "_input", idx)) {
+                    fanInputs[idx] = it->path();
+                }
             }
         }
 

@@ -16,11 +16,20 @@ QVector<BatteryTelemetry> BatteryCollector::collect() const {
     }
 
     std::vector<std::filesystem::path> dirs;
-    for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
-        if (!entry.is_directory(ec) && !entry.is_symlink(ec)) {
-            continue;
+    {
+        std::error_code iterEc;
+        for (std::filesystem::directory_iterator it(root, iterEc), end;
+             !iterEc && it != end;
+             it.increment(iterEc)) {
+            std::error_code entryEc;
+            const bool isDir = it->is_directory(entryEc) && !entryEc;
+            entryEc.clear();
+            const bool isLink = it->is_symlink(entryEc) && !entryEc;
+            if (!isDir && !isLink) {
+                continue;
+            }
+            dirs.push_back(it->path());
         }
-        dirs.push_back(entry.path());
     }
     std::sort(dirs.begin(), dirs.end());
 

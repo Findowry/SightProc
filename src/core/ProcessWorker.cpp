@@ -6,9 +6,9 @@
 
 namespace sysmon {
 
-ProcessWorker::ProcessWorker(QObject* parent)
+ProcessWorker::ProcessWorker(NvmlBridge& nvml, QObject* parent)
     : QObject(parent)
-    , m_collector(m_nvml) {}
+    , m_collector(nvml) {}
 
 ProcessWorker::~ProcessWorker() {
     stop();
@@ -36,7 +36,6 @@ void ProcessWorker::stop() {
     if (m_timer) {
         m_timer->stop();
     }
-    m_nvml.shutdown();
 }
 
 void ProcessWorker::setIntervalMs(int ms) {

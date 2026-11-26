@@ -136,8 +136,12 @@ void CpuCollector::initStaticMetadata() {
     const std::filesystem::path cpuSysRoot("/sys/devices/system/cpu");
     std::set<std::string> seenCaches;
 
-    if (std::filesystem::exists(cpuSysRoot, ec)) {
-        for (const auto& cpuEntry : std::filesystem::directory_iterator(cpuSysRoot, ec)) {
+    if (std::filesystem::exists(cpuSysRoot, ec) && !ec) {
+        std::error_code cpuIterEc;
+        for (std::filesystem::directory_iterator cpuIt(cpuSysRoot, cpuIterEc), cpuEnd;
+             !cpuIterEc && cpuIt != cpuEnd;
+             cpuIt.increment(cpuIterEc)) {
+            const auto& cpuEntry = *cpuIt;
             int cpuId = -1;
             if (!parseCoreIndexFromDir(cpuEntry.path().filename().string(), cpuId)) {
                 continue;
@@ -163,10 +167,15 @@ void CpuCollector::initStaticMetadata() {
             }
 
             const std::filesystem::path cacheRoot = cpuEntry.path() / "cache";
-            if (!std::filesystem::exists(cacheRoot, ec)) {
+            std::error_code cacheCheckEc;
+            if (!std::filesystem::exists(cacheRoot, cacheCheckEc) || cacheCheckEc) {
                 continue;
             }
-            for (const auto& idxEntry : std::filesystem::directory_iterator(cacheRoot, ec)) {
+            std::error_code cacheIterEc;
+            for (std::filesystem::directory_iterator idxIt(cacheRoot, cacheIterEc), idxEnd;
+                 !cacheIterEc && idxIt != idxEnd;
+                 idxIt.increment(cacheIterEc)) {
+                const auto& idxEntry = *idxIt;
                 if (!idxEntry.path().filename().string().starts_with("index")) {
                     continue;
                 }

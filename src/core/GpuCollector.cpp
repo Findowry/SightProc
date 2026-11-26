@@ -81,7 +81,11 @@ void GpuCollector::ensureDiscovered() {
         return;
     }
 
-    for (const auto& entry : std::filesystem::directory_iterator(drmRoot, ec)) {
+    std::error_code iterEc;
+    for (std::filesystem::directory_iterator it(drmRoot, iterEc), end;
+         !iterEc && it != end;
+         it.increment(iterEc)) {
+        const auto& entry = *it;
         const std::string fname = entry.path().filename().string();
         int cardNum = -1;
         if (!parseDrmCardNumber(fname, cardNum)) {
@@ -89,7 +93,8 @@ void GpuCollector::ensureDiscovered() {
         }
 
         const std::filesystem::path devDir = entry.path() / "device";
-        if (!std::filesystem::exists(devDir, ec)) {
+        std::error_code entryEc;
+        if (!std::filesystem::exists(devDir, entryEc) || entryEc) {
             continue;
         }
 
@@ -105,8 +110,9 @@ void GpuCollector::ensureDiscovered() {
             info.deviceHex = normalizeHex4(*d);
         }
 
-        const std::filesystem::path drvLink = std::filesystem::read_symlink(devDir / "driver", ec);
-        if (!ec && !drvLink.empty()) {
+        entryEc.clear();
+        const std::filesystem::path drvLink = std::filesystem::read_symlink(devDir / "driver", entryEc);
+        if (!entryEc && !drvLink.empty()) {
             info.driver = QString::fromStdString(drvLink.filename().string());
         } else {
             info.driver = QStringLiteral("unknown");
@@ -257,15 +263,19 @@ QVector<GpuTelemetry> GpuCollector::collect(double elapsedSec, bool probeSleepin
                 gpu.vramTotalBytes = *total;
             }
             const std::filesystem::path hwRoot = devDir / "hwmon";
-            if (std::filesystem::exists(hwRoot, ec)) {
-                for (const auto& hw : std::filesystem::directory_iterator(hwRoot, ec)) {
-                    if (const auto t = sysfs::readInt64(hw.path() / "temp1_input")) {
+            ec.clear();
+            if (std::filesystem::exists(hwRoot, ec) && !ec) {
+                std::error_code iterEc;
+                for (std::filesystem::directory_iterator it(hwRoot, iterEc), end;
+                     !iterEc && it != end;
+                     it.increment(iterEc)) {
+                    if (const auto t = sysfs::readInt64(it->path() / "temp1_input")) {
                         gpu.tempC = static_cast<double>(*t) / 1000.0;
                     }
-                    if (const auto p = sysfs::readUint64(hw.path() / "power1_average")) {
+                    if (const auto p = sysfs::readUint64(it->path() / "power1_average")) {
                         gpu.powerWatts = static_cast<double>(*p) / 1000000.0;
                     }
-                    if (const auto pwm = sysfs::readUint64(hw.path() / "pwm1")) {
+                    if (const auto pwm = sysfs::readUint64(it->path() / "pwm1")) {
                         gpu.fanPercent = std::clamp(static_cast<double>(*pwm) * 100.0 / 255.0,
                                                     0.0,
                                                     100.0);

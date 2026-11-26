@@ -157,9 +157,14 @@ void DesktopEntryIndex::scanDirectory(const QString& rootDir) {
         return;
     }
 
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(
-             rootPath, std::filesystem::directory_options::skip_permission_denied, ec)) {
-        if (!entry.is_regular_file(ec)) {
+    std::error_code iterEc;
+    std::filesystem::recursive_directory_iterator it(
+        rootPath, std::filesystem::directory_options::skip_permission_denied, iterEc);
+    const std::filesystem::recursive_directory_iterator end;
+    for (; !iterEc && it != end; it.increment(iterEc)) {
+        std::error_code entryEc;
+        const auto& entry = *it;
+        if (!entry.is_regular_file(entryEc) || entryEc) {
             continue;
         }
         const std::filesystem::path p = entry.path();
@@ -167,8 +172,8 @@ void DesktopEntryIndex::scanDirectory(const QString& rootDir) {
             continue;
         }
 
-        const std::filesystem::path rel = std::filesystem::relative(p, rootPath, ec);
-        if (ec) {
+        const std::filesystem::path rel = std::filesystem::relative(p, rootPath, entryEc);
+        if (entryEc) {
             continue;
         }
         QString desktopId = QString::fromStdString(rel.string());

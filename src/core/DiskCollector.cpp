@@ -56,11 +56,15 @@ double readDiskHwmonTemp(const std::filesystem::path& blockDir) {
         blockDir / "device/device/hwmon",
     };
     for (const auto& hwRoot : candidates) {
-        if (!std::filesystem::exists(hwRoot, ec)) {
+        ec.clear();
+        if (!std::filesystem::exists(hwRoot, ec) || ec) {
             continue;
         }
-        for (const auto& entry : std::filesystem::directory_iterator(hwRoot, ec)) {
-            if (const auto milliOpt = sysfs::readInt64(entry.path() / "temp1_input")) {
+        std::error_code iterEc;
+        for (std::filesystem::directory_iterator it(hwRoot, iterEc), end;
+             !iterEc && it != end;
+             it.increment(iterEc)) {
+            if (const auto milliOpt = sysfs::readInt64(it->path() / "temp1_input")) {
                 return static_cast<double>(*milliOpt) / 1000.0;
             }
         }
@@ -80,10 +84,15 @@ QVector<DiskTelemetry> DiskCollector::collect(double elapsedSec,
     }
 
     std::vector<std::string> diskNames;
-    for (const auto& entry : std::filesystem::directory_iterator(blockRoot, ec)) {
-        const std::string name = entry.path().filename().string();
-        if (!isVirtualBlockDevice(name)) {
-            diskNames.push_back(name);
+    {
+        std::error_code iterEc;
+        for (std::filesystem::directory_iterator it(blockRoot, iterEc), end;
+             !iterEc && it != end;
+             it.increment(iterEc)) {
+            const std::string name = it->path().filename().string();
+            if (!isVirtualBlockDevice(name)) {
+                diskNames.push_back(name);
+            }
         }
     }
     std::sort(diskNames.begin(), diskNames.end());

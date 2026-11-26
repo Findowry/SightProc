@@ -253,12 +253,18 @@ struct ProcessInfo {
     bool isKernelThread{false};
 };
 
+struct ProcessInstanceRef {
+    int pid{0};
+    std::uint64_t startTimeTicks{0};
+};
+
 struct ApplicationInfo {
     QString id;
     QString name;
     QString iconName;
     QString desktopId;
     QVector<int> pids;
+    QVector<ProcessInstanceRef> instances;
 
     double cpuPercent{0.0};
     std::uint64_t rssBytes{0};

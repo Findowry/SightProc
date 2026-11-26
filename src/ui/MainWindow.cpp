@@ -291,7 +291,7 @@ void MainWindow::connectSettingsSignals() {
 void MainWindow::startWorkers() {
     const auto& s = AppSettings::instance();
 
-    m_telemetryWorker = new TelemetryWorker();
+    m_telemetryWorker = new TelemetryWorker(m_nvml);
     m_telemetryWorker->setQtPlatformName(QGuiApplication::platformName());
     m_telemetryWorker->setIntervalMs(s.refreshIntervalMs());
     m_telemetryWorker->setProbeSleepingGpus(s.probeSleepingGpus());
@@ -309,7 +309,7 @@ void MainWindow::startWorkers() {
             m_telemetryWorker, &TelemetryWorker::setProbeSleepingGpus,
             Qt::QueuedConnection);
 
-    m_processWorker = new ProcessWorker();
+    m_processWorker = new ProcessWorker(m_nvml);
     m_processWorker->setIntervalMs(s.refreshIntervalMs());
     m_processWorker->setProbeSleepingGpus(s.probeSleepingGpus());
     m_processWorker->moveToThread(&m_processThread);
@@ -361,6 +361,9 @@ void MainWindow::shutdownWorkers() {
         delete m_processWorker;
         m_processWorker = nullptr;
     }
+
+    // Her iki iş parçacığı tamamen sonlandıktan sonra paylaşımlı NVML oturumunu bir kez kapat
+    m_nvml.shutdown();
 }
 
 void MainWindow::onTelemetrySummary(const SystemTelemetrySnapshot& snapshot) {
@@ -438,7 +441,7 @@ void MainWindow::showAboutDialog() {
     const QString desc = trText("Qt6 Widgets C++20 based GNU/Linux system monitor",
                                 "Qt6 Widgets C++20 tabanlı GNU/Linux sistem monitörü");
     box.setText(
-        QStringLiteral("<h3>SightProc 1.1.0</h3>"
+        QStringLiteral("<h3>SightProc 1.1.1</h3>"
                        "<p>Your sight into /proc.</p>"
                        "<p>%1</p>"
                        "<p><a href=\"https://github.com/Findowry/SightProc\">"

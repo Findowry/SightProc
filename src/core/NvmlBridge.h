@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <unordered_map>
 
 namespace sysmon {
@@ -41,13 +42,15 @@ public:
     NvmlBridge& operator=(const NvmlBridge&) = delete;
 
     [[nodiscard]] bool ensureInitialized();
-    [[nodiscard]] bool isAvailable() const noexcept { return m_initialized; }
+    [[nodiscard]] bool isAvailable() const;
     [[nodiscard]] bool queryDeviceByPciBusId(const QString& pciSlot, NvmlDeviceStats& out);
     [[nodiscard]] std::unordered_map<std::uint32_t, NvmlProcessMetrics>
     queryAllProcessMetrics(bool probeSleepingGpus);
     void shutdown();
 
 private:
+    [[nodiscard]] bool ensureInitializedLocked();
+    void shutdownLocked();
     // Resmi nvml.h ABI yapıları (Linux x86_64/aarch64 LP64)
     struct NvmlUtilization {
         unsigned int gpu;
@@ -130,6 +133,7 @@ private:
                                                    unsigned int*,
                                                    unsigned long long);
 
+    mutable std::mutex m_mutex;
     void* m_handle{nullptr};
     bool m_attemptedInit{false};
     bool m_initialized{false};

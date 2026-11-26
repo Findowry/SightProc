@@ -8,9 +8,9 @@
 
 namespace sysmon {
 
-TelemetryWorker::TelemetryWorker(QObject* parent)
+TelemetryWorker::TelemetryWorker(NvmlBridge& nvml, QObject* parent)
     : QObject(parent)
-    , m_gpuCollector(m_nvml) {}
+    , m_gpuCollector(nvml) {}
 
 TelemetryWorker::~TelemetryWorker() {
     stop();
@@ -45,7 +45,6 @@ void TelemetryWorker::stop() {
     if (m_timer) {
         m_timer->stop();
     }
-    m_nvml.shutdown();
 }
 
 void TelemetryWorker::setIntervalMs(int ms) {

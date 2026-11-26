@@ -19,7 +19,7 @@ class ProcessWorker : public QObject {
     Q_OBJECT
 
 public:
-    explicit ProcessWorker(QObject* parent = nullptr);
+    explicit ProcessWorker(NvmlBridge& nvml, QObject* parent = nullptr);
     ~ProcessWorker() override;
 
 public slots:
@@ -38,7 +38,6 @@ private slots:
 private:
     void collectAndEmit();
 
-    NvmlBridge m_nvml;
     ProcessCollector m_collector;
     QTimer* m_timer{nullptr};
     int m_intervalMs{1500};

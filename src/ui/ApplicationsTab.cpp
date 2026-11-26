@@ -2,6 +2,7 @@
 
 #include "core/AppSettings.h"
 #include "core/Lang.h"
+#include "core/ProcessSignalUtils.h"
 #include "models/ApplicationTableModel.h"
 #include "widgets/ThemeUtils.h"
 
@@ -20,7 +21,6 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
-#include <cerrno>
 #include <csignal>
 #include <cstring>
 
@@ -208,14 +208,21 @@ void ApplicationsTab::onContextMenuRequested(const QPoint& pos) {
 void ApplicationsTab::sendSignalToApplication(const ApplicationInfo& app, int sig) {
     int lastErr = 0;
     int failCount = 0;
-    for (int pid : app.pids) {
-        if (::kill(static_cast<pid_t>(pid), sig) != 0) {
-            if (errno != ESRCH) {
-                lastErr = errno;
-                ++failCount;
-            }
+    int reusedCount = 0;
+
+    for (const ProcessInstanceRef& inst : app.instances) {
+        int err = 0;
+        const proc::SignalResult res =
+            proc::sendSignalSafe(inst.pid, inst.startTimeTicks, sig, &err);
+        if (res == proc::SignalResult::PidReused) {
+            ++reusedCount;
+        } else if (res == proc::SignalResult::PermissionDenied ||
+                   res == proc::SignalResult::Failed) {
+            lastErr = err;
+            ++failCount;
         }
     }
+
     if (failCount > 0) {
         QMessageBox::warning(
             this,
@@ -224,6 +231,14 @@ void ApplicationsTab::sendSignalToApplication(const ApplicationInfo& app, int si
                    "%2 uygulamasının %1 alt sürecine sinyal gönderilemedi: %3")
                 .arg(failCount)
                 .arg(app.name, QString::fromLocal8Bit(std::strerror(lastErr))));
+    } else if (reusedCount > 0) {
+        QMessageBox::warning(
+            this,
+            trText("Process Exited or PID Reused", "Süreç Sonlanmış veya PID Yeniden Kullanılmış"),
+            trText("Skipped %1 process(es) of %2 because their PID was reused or no longer matched the original instance.",
+                   "%2 uygulamasının %1 süreci, PID yeniden kullanıldığı veya özgün örnekle eşleşmediği için güvenlik amacıyla atlandı.")
+                .arg(reusedCount)
+                .arg(app.name));
     }
 }
 

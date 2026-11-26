@@ -246,7 +246,7 @@ int main(int argc, char* argv[]) {
     QApplication::setOrganizationName(QStringLiteral("sightproc"));
     QApplication::setApplicationName(QStringLiteral("sightproc"));
     QApplication::setApplicationDisplayName(QStringLiteral("SightProc"));
-    QApplication::setApplicationVersion(QStringLiteral("1.1.0"));
+    QApplication::setApplicationVersion(QStringLiteral("1.1.1"));
     QGuiApplication::setDesktopFileName(QStringLiteral("sightproc"));
 
     QIcon appIcon(QStringLiteral(":/icons/sightproc.svg"));

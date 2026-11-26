@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(SightProc VERSION 1.1.0 LANGUAGES CXX)
+project(SightProc VERSION 1.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -47,6 +47,8 @@ add_executable(sightproc
     src/core/DesktopEntryIndex.cpp
     src/core/ProcessCollector.h
     src/core/ProcessCollector.cpp
+    src/core/ProcessSignalUtils.h
+    src/core/ProcessSignalUtils.cpp
     src/core/ProcessWorker.h
     src/core/ProcessWorker.cpp
     src/core/SystemdController.h

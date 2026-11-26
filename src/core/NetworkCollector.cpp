@@ -72,10 +72,15 @@ QVector<NetworkTelemetry> NetworkCollector::collect(double elapsedSec) {
     }
 
     std::vector<std::string> interfaces;
-    for (const auto& entry : std::filesystem::directory_iterator(netRoot, ec)) {
-        const std::string name = entry.path().filename().string();
-        if (name != "lo") {
-            interfaces.push_back(name);
+    {
+        std::error_code iterEc;
+        for (std::filesystem::directory_iterator it(netRoot, iterEc), end;
+             !iterEc && it != end;
+             it.increment(iterEc)) {
+            const std::string name = it->path().filename().string();
+            if (name != "lo") {
+                interfaces.push_back(name);
+            }
         }
     }
     std::sort(interfaces.begin(), interfaces.end());
